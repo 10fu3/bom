@@ -1,0 +1,588 @@
+package generated
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"bom/internal/planner"
+	"bom/pkg/bom"
+	"bom/pkg/dialect"
+	"bom/pkg/opt"
+	{{ .DialectImportAlias }} "{{ .DialectImportPath }}"
+)
+
+var activeDialect dialect.Dialect = {{ .DialectInit }}
+
+type OrderDirection string
+
+const (
+	OrderDirectionASC  OrderDirection = "ASC"
+	OrderDirectionDESC OrderDirection = "DESC"
+)
+
+type argState struct {
+	d    dialect.Dialect
+	next int
+	args []any
+}
+
+func newArgState(d dialect.Dialect) *argState {
+	return &argState{d: d}
+}
+
+func (s *argState) Add(value any) string {
+	s.next++
+	s.args = append(s.args, value)
+	return s.d.Placeholder(s.next)
+}
+
+func (s *argState) Args() []any {
+	return s.args
+}
+
+type whereBuilder struct {
+	d     dialect.Dialect
+	alias string
+	args  *argState
+}
+
+func newWhereBuilder(d dialect.Dialect, alias string, args *argState) *whereBuilder {
+	return &whereBuilder{d: d, alias: alias, args: args}
+}
+
+func (w *whereBuilder) columnRef(column string) string {
+	return fmt.Sprintf("%s.%s", w.d.QuoteIdent(w.alias), w.d.QuoteIdent(column))
+}
+
+func (w *whereBuilder) addArg(value any) string {
+	if w.args == nil {
+		return ""
+	}
+	return w.args.Add(value)
+}
+
+func (w *whereBuilder) eq(column string, value any) string {
+	return w.d.Eq(w.columnRef(column), w.addArg(value))
+}
+
+func (w *whereBuilder) combineAnd(preds []string) string {
+	if len(preds) == 0 {
+		return ""
+	}
+	if len(preds) == 1 {
+		return preds[0]
+	}
+	return w.d.And(preds...)
+}
+
+func (w *whereBuilder) combineOr(preds []string) string {
+	if len(preds) == 0 {
+		return ""
+	}
+	if len(preds) == 1 {
+		return preds[0]
+	}
+	return w.d.Or(preds...)
+}
+
+func columnEquals(d dialect.Dialect, leftAlias, leftCol, rightAlias, rightCol string) string {
+	return fmt.Sprintf("%s.%s = %s.%s", d.QuoteIdent(leftAlias), d.QuoteIdent(leftCol), d.QuoteIdent(rightAlias), d.QuoteIdent(rightCol))
+}
+
+func jsonPair(key, expr string) string {
+	safe := strings.ReplaceAll(key, "'", "''")
+	return fmt.Sprintf("'%s', %s", safe, expr)
+}
+
+func convertOpt(v opt.Opt[int]) *int64 {
+	if !v.IsSome() {
+		return nil
+	}
+	val := int64(v.Value())
+	return &val
+}
+
+func one() *int64 {
+	v := int64(1)
+	return &v
+}
+
+{{ range .Tables }}
+{{- $model := .ModelName -}}
+{{- $firstCol := index .Columns 0 -}}
+var {{ .ModelName }}AllColumns = []string{
+	{{- range .Columns }}
+	"{{ .Name }}",
+	{{- end }}
+}
+
+type {{ .ModelName }} struct {
+	{{- range .Columns }}
+	{{ if .Nullable }}
+	{{ .Camel }} opt.Opt[{{ .GoType }}] `json:"{{ .Name }},omitempty"`
+	{{- else }}
+	{{ .Camel }} {{ .GoType }} `json:"{{ .Name }}"`
+	{{- end }}
+	{{- end }}
+	{{- range .Relations }}
+	{{- if eq .Kind "HasMany" }}
+	{{ .FieldName }} []{{ .TargetModel }} `json:"{{ lowerFirst .FieldName }},omitempty"`
+	{{- else }}
+	{{ .FieldName }} *{{ .TargetModel }} `json:"{{ lowerFirst .FieldName }},omitempty"`
+	{{- end }}
+	{{- end }}
+}
+
+type {{ .ModelName }}Model interface {
+	{{ .ModelName }}
+}
+
+type {{ .ModelName }}Field string
+
+const (
+	{{ .ModelName }}FieldUnknown {{ .ModelName }}Field = ""
+	{{- range .Columns }}
+	{{ $model }}Field{{ .Camel }} {{ $model }}Field = "{{ .Name }}"
+	{{- end }}
+)
+
+type {{ .ModelName }}WhereInput struct {
+	AND []{{ .ModelName }}WhereInput
+	OR  []{{ .ModelName }}WhereInput
+	NOT []{{ .ModelName }}WhereInput
+	{{- range .Columns }}
+	{{ .Camel }} opt.Opt[{{ .GoType }}]
+	{{- end }}
+	{{- range .Relations }}
+	{{ .FieldName }} *{{ $model }}{{ .FieldName }}Relation
+	{{- end }}
+}
+
+type {{ .ModelName }}WhereUniqueInput struct {
+	{{- range .PrimaryKey }}
+	{{ .Camel }} *{{ .GoType }}
+	{{- end }}
+}
+
+type {{ .ModelName }}OrderByInput struct {
+	Field     {{ .ModelName }}Field
+	Direction OrderDirection
+}
+
+{{- range .Relations }}
+type {{ $model }}{{ .FieldName }}Relation struct {
+	Some *{{ .TargetModel }}WhereInput
+	None *{{ .TargetModel }}WhereInput
+}
+{{- end }}
+
+type {{ .ModelName }}Select []{{ .ModelName }}SelectItem
+
+type {{ .ModelName }}SelectItem interface {
+	is{{ .ModelName }}SelectItem()
+}
+
+func ({{ .ModelName }}Field) is{{ .ModelName }}SelectItem() {}
+
+{{- range .Relations }}
+type {{ $model }}Select{{ .FieldName }} struct {
+	Args {{ .SelectArgsName }}
+}
+
+func ({{ $model }}Select{{ .FieldName }}) is{{ $model }}SelectItem() {}
+{{ end }}
+
+var {{ .ModelName }}SelectAll = {{ .ModelName }}Select{
+	{{- range .Columns }}
+	{{ $model }}Field{{ .Camel }},
+	{{- end }}
+}
+
+{{- range .Relations }}
+type {{ .SelectArgsName }} struct {
+	{{- if eq .Kind "HasMany" }}
+	Where   *{{ .TargetModel }}WhereInput
+	OrderBy []{{ .TargetModel }}OrderByInput
+	Take    opt.Opt[int]
+	Skip    opt.Opt[int]
+	{{- end }}
+	Select  {{ .TargetModel }}Select
+}
+{{ end }}
+
+type {{ .ModelName }}FindMany struct {
+	Where    *{{ .ModelName }}WhereInput
+	OrderBy  []{{ .ModelName }}OrderByInput
+	Take     opt.Opt[int]
+	Skip     opt.Opt[int]
+	Distinct []{{ .ModelName }}Field
+	Select   {{ .ModelName }}Select
+}
+
+type {{ .ModelName }}FindFirst struct {
+	Where   *{{ .ModelName }}WhereInput
+	OrderBy []{{ .ModelName }}OrderByInput
+	Skip    opt.Opt[int]
+	Select  {{ .ModelName }}Select
+}
+
+func build{{ .ModelName }}Where(d dialect.Dialect, alias string, args *argState, where *{{ .ModelName }}WhereInput) string {
+	if where == nil {
+		return ""
+	}
+	w := newWhereBuilder(d, alias, args)
+	return build{{ .ModelName }}WherePredicates(w, where)
+}
+
+func build{{ .ModelName }}WherePredicates(w *whereBuilder, where *{{ .ModelName }}WhereInput) string {
+	var preds []string
+	{{- range .Columns }}
+	if where.{{ .Camel }}.IsSome() {
+		preds = append(preds, w.eq("{{ .Name }}", where.{{ .Camel }}.Value()))
+	}
+	{{- end }}
+	{{- range .Relations }}
+	if where.{{ .FieldName }} != nil {
+		if clause := build{{ $model }}{{ .FieldName }}Relation(w.d, w.alias, w.args, where.{{ .FieldName }}); clause != "" {
+			preds = append(preds, clause)
+		}
+	}
+	{{- end }}
+	for i := range where.AND {
+		if clause := build{{ .ModelName }}WherePredicates(w, &where.AND[i]); clause != "" {
+			preds = append(preds, clause)
+		}
+	}
+	var orPreds []string
+	for i := range where.OR {
+		if clause := build{{ .ModelName }}WherePredicates(w, &where.OR[i]); clause != "" {
+			orPreds = append(orPreds, clause)
+		}
+	}
+	if orClause := w.combineOr(orPreds); orClause != "" {
+		preds = append(preds, orClause)
+	}
+	for i := range where.NOT {
+		if clause := build{{ .ModelName }}WherePredicates(w, &where.NOT[i]); clause != "" {
+			preds = append(preds, w.d.Not(clause))
+		}
+	}
+	return w.combineAnd(preds)
+}
+
+{{- range .Relations }}
+func build{{ $model }}{{ .FieldName }}Relation(d dialect.Dialect, parentAlias string, args *argState, rel *{{ $model }}{{ .FieldName }}Relation) string {
+	if rel == nil {
+		return ""
+	}
+	var preds []string
+	if rel.Some != nil {
+		if clause := build{{ $model }}{{ .FieldName }}RelationExists(d, parentAlias, args, rel.Some, false); clause != "" {
+			preds = append(preds, clause)
+		}
+	}
+	if rel.None != nil {
+		if clause := build{{ $model }}{{ .FieldName }}RelationExists(d, parentAlias, args, rel.None, true); clause != "" {
+			preds = append(preds, clause)
+		}
+	}
+	if len(preds) == 0 {
+		return ""
+	}
+	if len(preds) == 1 {
+		return preds[0]
+	}
+	return d.And(preds...)
+}
+
+func build{{ $model }}{{ .FieldName }}RelationExists(d dialect.Dialect, parentAlias string, args *argState, where *{{ .TargetModel }}WhereInput, negate bool) string {
+	childAlias := parentAlias + "_{{ lowerFirst .FieldName }}"
+	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("{{ .TargetTable }}"), d.QuoteIdent(childAlias))
+	joinConds := make([]string, 0, {{ len .ForeignKeys }})
+	{{- $rel := . -}}
+	{{- range $idx, $fk := .ForeignKeys }}
+	joinConds = append(joinConds, columnEquals(d, childAlias, "{{ $fk }}", parentAlias, "{{ index $rel.LocalKeys $idx }}"))
+	{{- end }}
+	var combined string
+	if len(joinConds) > 0 {
+		combined = strings.Join(joinConds, " AND ")
+	}
+	if whereClause := build{{ .TargetModel }}Where(d, childAlias, args, where); whereClause != "" {
+		if combined != "" {
+			combined = d.And(combined, whereClause)
+		} else {
+			combined = whereClause
+		}
+	}
+	if combined == "" {
+		combined = "1=1"
+	}
+	expr := fmt.Sprintf("SELECT 1 FROM %s WHERE %s", tableRef, combined)
+	if negate {
+		return fmt.Sprintf("NOT EXISTS (%s)", expr)
+	}
+	return fmt.Sprintf("EXISTS (%s)", expr)
+}
+{{- end }}
+
+func build{{ .ModelName }}WhereUnique(d dialect.Dialect, alias string, args *argState, where *{{ .ModelName }}WhereUniqueInput) string {
+	if where == nil {
+		return ""
+	}
+	w := newWhereBuilder(d, alias, args)
+	var preds []string
+	{{- range .PrimaryKey }}
+	if where.{{ .Camel }} != nil {
+		preds = append(preds, w.eq("{{ .Name }}", *where.{{ .Camel }}))
+	}
+	{{- end }}
+	return w.combineAnd(preds)
+}
+
+func build{{ .ModelName }}OrderBy(d dialect.Dialect, alias string, order []{{ .ModelName }}OrderByInput) []string {
+	var cols []string
+	for _, o := range order {
+		if o.Field == "" {
+			continue
+		}
+		dir := "ASC"
+		if o.Direction == OrderDirectionDESC {
+			dir = "DESC"
+		}
+		cols = append(cols, fmt.Sprintf("%s.%s %s", d.QuoteIdent(alias), d.QuoteIdent(string(o.Field)), dir))
+	}
+	return cols
+}
+
+func build{{ .ModelName }}Distinct(d dialect.Dialect, alias string, distinct []{{ .ModelName }}Field) []string {
+	var out []string
+	for _, field := range distinct {
+		if field == "" {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent(string(field))))
+	}
+	return out
+}
+
+func build{{ .ModelName }}JSONExpr(d dialect.Dialect, alias string, args *argState, sel {{ .ModelName }}Select) (string, error) {
+	items := sel
+	includeAll := len(items) == 0
+	var pairs []string
+	if includeAll {
+		{{- range .Columns }}
+		pairs = append(pairs, jsonPair("{{ .Name }}", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("{{ .Name }}"))))
+		{{- end }}
+		{{- if .Relations }}
+		{{- range .Relations }}
+		expr, err := build{{ $model }}{{ .FieldName }}JSON(d, alias, args, &{{ .SelectArgsName }}{})
+		if err != nil {
+			return "", err
+		}
+		pairs = append(pairs, jsonPair("{{ lowerFirst .FieldName }}", expr))
+		{{- end }}
+		{{- end }}
+	} else {
+		seen := make(map[{{ .ModelName }}Field]struct{})
+		{{- if .Relations }}
+		relationSeen := make(map[string]struct{})
+		{{- end }}
+		for _, item := range items {
+			switch v := item.(type) {
+			case {{ .ModelName }}Field:
+				if v == {{ .ModelName }}FieldUnknown {
+					continue
+				}
+				if _, ok := seen[v]; ok {
+					continue
+				}
+				seen[v] = struct{}{}
+				pairs = append(pairs, jsonPair(string(v), fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent(string(v)))))
+			{{- range .Relations }}
+			case {{ $model }}Select{{ .FieldName }}:
+				if _, ok := relationSeen["{{ .FieldName }}"]; ok {
+					continue
+				}
+				relationSeen["{{ .FieldName }}"] = struct{}{}
+				expr, err := build{{ $model }}{{ .FieldName }}JSON(d, alias, args, &v.Args)
+				if err != nil {
+					return "", err
+				}
+				pairs = append(pairs, jsonPair("{{ lowerFirst .FieldName }}", expr))
+			{{- end }}
+			}
+		}
+	}
+	if len(pairs) == 0 {
+		pairs = append(pairs, jsonPair("{{ $firstCol.Name }}", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("{{ $firstCol.Name }}"))))
+	}
+	return d.JSONBuildObject(pairs...), nil
+}
+
+{{- range .Relations }}
+func build{{ $model }}{{ .FieldName }}JSON(d dialect.Dialect, parentAlias string, args *argState, sel *{{ .SelectArgsName }}) (string, error) {
+	if sel == nil {
+		sel = &{{ .SelectArgsName }}{}
+	}
+	childAlias := parentAlias + "_{{ lowerFirst .FieldName }}"
+	childJSON, err := build{{ .TargetModel }}JSONExpr(d, childAlias, args, sel.Select)
+	if err != nil {
+		return "", err
+	}
+	joinConds := make([]string, 0, {{ len .ForeignKeys }})
+	{{- $rel := . -}}
+	{{- range $idx, $fk := .ForeignKeys }}
+	joinConds = append(joinConds, columnEquals(d, childAlias, "{{ $fk }}", parentAlias, "{{ index $rel.LocalKeys $idx }}"))
+	{{- end }}
+	joinClause := strings.Join(joinConds, " AND ")
+	var whereClause string
+	{{- if eq .Kind "HasMany" }}
+	whereClause = build{{ .TargetModel }}Where(d, childAlias, args, sel.Where)
+	if joinClause != "" {
+		if whereClause != "" {
+			whereClause = d.And(joinClause, whereClause)
+		} else {
+			whereClause = joinClause
+		}
+	}
+	{{- else }}
+	whereClause = joinClause
+	{{- end }}
+	var whereSQL string
+	if whereClause != "" {
+		whereSQL = " WHERE " + whereClause
+	}
+	{{- if eq .Kind "HasMany" }}
+	var orderSQL string
+	var lo string
+	orderClause := build{{ .TargetModel }}OrderBy(d, childAlias, sel.OrderBy)
+	if len(orderClause) > 0 {
+		orderSQL = " ORDER BY " + strings.Join(orderClause, ", ")
+	}
+	limit := convertOpt(sel.Take)
+	offset := convertOpt(sel.Skip)
+	lo = d.LimitOffset(limit, offset)
+	{{- end }}
+	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("{{ .TargetTable }}"), d.QuoteIdent(childAlias))
+	{{- if eq .Kind "HasMany" }}
+	arrayExpr := d.JSONArrayAgg(childJSON)
+	expr := fmt.Sprintf("(SELECT %s FROM %s%s%s", d.CoalesceJSONAgg(arrayExpr, d.JSONArrayEmpty()), tableRef, whereSQL, orderSQL)
+	if lo != "" {
+		expr += " " + lo
+	}
+	expr += ")"
+	return expr, nil
+	{{- else }}
+	expr := fmt.Sprintf("(SELECT %s FROM %s%s", childJSON, tableRef, whereSQL)
+	expr += ")"
+	return expr, nil
+	{{- end }}
+}
+{{- end }}
+
+func FindMany{{ .ModelName }}[T {{ .ModelName }}Model](ctx context.Context, db bom.Querier, q {{ .ModelName }}FindMany) ([]T, error) {
+	d := activeDialect
+	state := newArgState(d)
+	rootAlias := "t0"
+	jsonExpr, err := build{{ .ModelName }}JSONExpr(d, rootAlias, state, q.Select)
+	if err != nil {
+		return nil, err
+	}
+	whereClause := build{{ .ModelName }}Where(d, rootAlias, state, q.Where)
+	input := planner.FindManyInput{
+		Table: "{{ .TableName }}",
+		Alias: rootAlias,
+		Projections: []planner.Projection{
+			{Expr: jsonExpr, Alias: "__bom_json"},
+		},
+		Where:    whereClause,
+		Args:     state.Args(),
+		OrderBy:  build{{ .ModelName }}OrderBy(d, rootAlias, q.OrderBy),
+		Distinct: build{{ .ModelName }}Distinct(d, rootAlias, q.Distinct),
+		Limit:    convertOpt(q.Take),
+		Offset:   convertOpt(q.Skip),
+		JSONArray: true,
+	}
+	return query{{ .ModelName }}Rows[T](ctx, db, d, input, true)
+}
+
+func FindFirst{{ .ModelName }}[T {{ .ModelName }}Model](ctx context.Context, db bom.Querier, q {{ .ModelName }}FindFirst) (*T, error) {
+	fm := {{ .ModelName }}FindMany{
+		Where:   q.Where,
+		OrderBy: q.OrderBy,
+		Skip:    q.Skip,
+		Select:  q.Select,
+	}
+	fm.Take = opt.OVal(1)
+	rows, err := FindMany{{ .ModelName }}[T](ctx, db, fm)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, sql.ErrNoRows
+	}
+	out := rows[0]
+	return &out, nil
+}
+
+func query{{ .ModelName }}Rows[T {{ .ModelName }}Model](ctx context.Context, db bom.Querier, d dialect.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
+	sqlStr, args, err := planner.BuildFindMany(d, input)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.QueryContext(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []T
+	if expectArray {
+		if rows.Next() {
+			var raw []byte
+			if err := rows.Scan(&raw); err != nil {
+				return nil, err
+			}
+			if len(raw) == 0 {
+				raw = []byte("[]")
+			}
+			var payload []json.RawMessage
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				return nil, err
+			}
+			for _, item := range payload {
+				var rec {{ .ModelName }}
+				if err := json.Unmarshal(item, &rec); err != nil {
+					return nil, err
+				}
+				result = append(result, T(rec))
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		if len(raw) == 0 {
+			raw = []byte("{}")
+		}
+		var rec {{ .ModelName }}
+		if err := json.Unmarshal(raw, &rec); err != nil {
+			return nil, err
+		}
+		result = append(result, T(rec))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+{{ end }}
