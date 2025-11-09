@@ -1,0 +1,17 @@
+output:
+  root: ./examples/basic/generated
+
+dialect: mysql
+include_tables: [author, video]
+
+associations:
+  author:
+    - type: HasMany
+      to: video
+      local_keys: [id]
+      foreign_keys: [author_id]
+  video:
+    - type: BelongsTo
+      to: author
+      local_keys: [author_id]
+      foreign_keys: [id]
