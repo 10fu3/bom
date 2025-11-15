@@ -13,7 +13,7 @@ Bom is a Go-first, read-only ORM that mirrors Prisma’s object style while pres
 ## Requirements
 - Go 1.22 or newer
 - A supported SQL dialect (`mysql`, `postgres`, or `sqlite`) for query rendering
-- DDL file (`schema.sql`) that TiDB’s MySQL parser can understand (other dialect parsers are pluggable, but the default CLI currently uses the MySQL/TiDB version)
+- DDL file (`schema.sql`) that TiDB’s MySQL parser or the bundled goyacc-powered SQLite parser can understand (other dialect parsers are pluggable as well)
 
 ## Install the generator
 ```bash
@@ -105,7 +105,7 @@ go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
 
 ## Limitations & roadmap
 - Write operations (INSERT/UPDATE/DELETE) are intentionally out of scope.
-- The CLI currently bootstraps using the TiDB MySQL parser; PostgreSQL and SQLite DDL loaders exist internally but are not wired into `bomgen` yet.
+- The CLI currently bootstraps using the TiDB MySQL parser or the goyacc-based SQLite loader selected via `dialect`; a PostgreSQL DDL loader exists internally but is not wired into `bomgen` yet.
 - Generated `SelectAll` constants include scalar columns only—relations must be opted in to avoid infinite recursion across circular relations.
 
 ## License

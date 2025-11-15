@@ -1,7 +1,7 @@
 output:
   root: ./examples/basic/generated
 
-dialect: mysql
+dialect: sqlite
 include_tables: [author, video]
 
 associations:

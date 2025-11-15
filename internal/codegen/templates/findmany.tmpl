@@ -378,7 +378,9 @@ func build{{ .ModelName }}JSONExpr(d dialect.Dialect, alias string, args *argSta
 		{{- end }}
 		{{- if .Relations }}
 		{{- range .Relations }}
-		expr, err := build{{ $model }}{{ .FieldName }}JSON(d, alias, args, &{{ .SelectArgsName }}{})
+		expr, err := build{{ $model }}{{ .FieldName }}JSON(d, alias, args, &{{ .SelectArgsName }}{
+			Select: {{ .TargetModel }}SelectAll,
+		})
 		if err != nil {
 			return "", err
 		}

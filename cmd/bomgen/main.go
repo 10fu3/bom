@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"bom/internal/assoc"
 	"bom/internal/codegen"
 	"bom/internal/config"
-	"bom/internal/parser/mysql"
+	parseriface "bom/internal/parser"
+	parsermysql "bom/internal/parser/mysql"
+	parsersqlite "bom/internal/parser/sqlite"
 	"bom/internal/schema"
 )
 
@@ -35,7 +38,7 @@ func main() {
 		log.Fatalf("config parse failed: %v", err)
 	}
 
-	parser := mysql.New()
+	parser := selectParser(cfg.Dialect)
 	ir, err := parser.Parse(context.Background(), string(ddl))
 	if err != nil {
 		log.Fatalf("parse failed: %v", err)
@@ -81,4 +84,13 @@ func filterTables(ir schema.IR, include, exclude []string) schema.IR {
 		out.AddTable(t)
 	}
 	return out
+}
+
+func selectParser(name string) parseriface.DDLParser {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "sqlite":
+		return parsersqlite.New()
+	default:
+		return parsermysql.New()
+	}
 }
