@@ -17,6 +17,8 @@ type Capabilities struct {
 	DistinctOn      bool
 	CaseInsensitive Strategy
 	Placeholder     string
+	InsertReturning bool
+	MaxParameters   int
 }
 
 // Dialect builds SQL snippets in a dialect-aware manner.

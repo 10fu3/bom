@@ -52,6 +52,9 @@ func FindUnique{{ .ModelName }}[T {{ .ModelName }}Model, U {{ .ModelName }}Uniqu
 		return nil, err
 	}
 	jsonExpr = wrapJSONValue(d, jsonExpr)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
 	input := planner.FindManyInput{
 		Table: "{{ .TableName }}",
 		Alias: alias,

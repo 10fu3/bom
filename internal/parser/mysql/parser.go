@@ -340,7 +340,18 @@ func applyInlineColumnOptions(t *schema.Table, colDef *ast.ColumnDef) {
 			ensurePrimaryKeyColumn(t, colName)
 		case ast.ColumnOptionUniqKey:
 			ensureSingleColumnUnique(t, colName)
+		case ast.ColumnOptionAutoIncrement:
+			markAutoIncrementColumn(t, colName)
 		}
+	}
+}
+
+func markAutoIncrementColumn(t *schema.Table, col string) {
+	if t == nil {
+		return
+	}
+	if idx := columnIndex(t.Columns, col); idx >= 0 {
+		t.Columns[idx].AutoIncrement = true
 	}
 }
 

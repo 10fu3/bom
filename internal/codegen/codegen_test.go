@@ -70,6 +70,18 @@ func TestGenerateCreatesTypes(t *testing.T) {
 	if !strings.Contains(out, "func FindUniqueVideo[T VideoModel, U VideoUnique]") {
 		t.Fatalf("expected generic FindUnique function, got:\n%s", out)
 	}
+	if !strings.Contains(out, "type VideoCreateData struct") {
+		t.Fatalf("expected create data struct, got:\n%s", out)
+	}
+	if !strings.Contains(out, "func CreateOneVideo[T VideoModel]") {
+		t.Fatalf("expected create helper, got:\n%s", out)
+	}
+	if !strings.Contains(out, "type VideoCreateMany struct") {
+		t.Fatalf("expected create many struct, got:\n%s", out)
+	}
+	if !strings.Contains(out, "func CreateManyVideo") {
+		t.Fatalf("expected CreateMany helper, got:\n%s", out)
+	}
 	if !strings.Contains(out, "type VideoSelectAuthor struct") {
 		t.Fatalf("expected relation select union type, got:\n%s", out)
 	}
