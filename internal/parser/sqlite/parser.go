@@ -151,12 +151,14 @@ func (tb *tableBuilder) finalize() schema.Table {
 		if col == nil {
 			continue
 		}
+		auto := col.primaryKey && isIntegerType(col.dbType)
 		result.Columns = append(result.Columns, schema.Column{
 			Name:     col.name,
 			DBType:   normalizeType(col.dbType),
 			GoType:   mapType(col.dbType),
 			Nullable: !col.notNull,
 			Default:  cloneString(col.defaultExpr),
+			AutoIncrement: auto,
 		})
 		if col.primaryKey {
 			result.PrimaryKey = append(result.PrimaryKey, col.name)
@@ -181,6 +183,11 @@ func (tb *tableBuilder) finalize() schema.Table {
 	result.Uniques = append(result.Uniques, tb.uniques...)
 	result.ForeignKeys = append(result.ForeignKeys, tb.foreignKeys...)
 	return result
+}
+
+func isIntegerType(dbType string) bool {
+	upper := strings.ToUpper(dbType)
+	return strings.Contains(upper, "INT")
 }
 
 func appendUnique(existing []schema.Unique, name string, cols []string) []schema.Unique {

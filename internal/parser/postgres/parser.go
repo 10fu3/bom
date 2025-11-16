@@ -155,6 +155,7 @@ func (tb *tableBuilder) finalize() schema.Table {
 		if col == nil {
 			continue
 		}
+		auto := isSerialType(col.dbType) || defaultUsesSequence(col.defaultExpr)
 		result.Columns = append(result.Columns, schema.Column{
 			Name:     col.name,
 			DBType:   normalizeType(col.dbType),
@@ -162,6 +163,7 @@ func (tb *tableBuilder) finalize() schema.Table {
 			Nullable: !col.notNull,
 			Default:  cloneString(col.defaultExpr),
 			Comment:  cloneString(col.comment),
+			AutoIncrement: auto,
 		})
 		if col.primaryKey {
 			result.PrimaryKey = append(result.PrimaryKey, col.name)
@@ -189,6 +191,18 @@ func (tb *tableBuilder) finalize() schema.Table {
 		result.ForeignKeys = append(result.ForeignKeys, tb.foreignKeys...)
 	}
 	return result
+}
+
+func isSerialType(dbType string) bool {
+	upper := strings.ToUpper(dbType)
+	return strings.Contains(upper, "SERIAL")
+}
+
+func defaultUsesSequence(def *string) bool {
+	if def == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(*def), "nextval")
 }
 
 func appendUnique(existing []schema.Unique, name string, cols []string) []schema.Unique {

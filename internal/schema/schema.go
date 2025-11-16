@@ -30,6 +30,8 @@ type Column struct {
 	Nullable bool
 	Default  *string
 	Comment  *string
+	AutoIncrement bool
+	Identity      string
 }
 
 // Unique represents a unique or primary key constraint.
