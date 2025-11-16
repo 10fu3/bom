@@ -30,6 +30,7 @@ func New() *Generator {
 	funcs := template.FuncMap{
 		"camel":      toCamel,
 		"lowerFirst": lowerFirst,
+		"castInt64":  func(goType, value string) string { return castInt64(goType, value) },
 	}
 	combined := findManyTemplate + "\n" + findUniqueTemplate
 	return &Generator{
@@ -89,6 +90,8 @@ type columnData struct {
 	Camel    string
 	GoType   string
 	Nullable bool
+	AutoIncrement bool
+	Identity      string
 }
 
 type uniqueConstraint struct {
@@ -100,6 +103,7 @@ type uniqueField struct {
 	ColumnName string
 	Camel      string
 	GoType     string
+	Nullable   bool
 }
 
 type relationData struct {
@@ -111,6 +115,12 @@ type relationData struct {
 	LocalKeys      []string
 	ForeignKeys    []string
 	AllowSelectAll bool
+	InheritedKeys  []inheritedKey
+}
+
+type inheritedKey struct {
+	ParentField string
+	ChildField  string
 }
 
 type dialectInfo struct {
@@ -182,6 +192,8 @@ func buildTables(ir schema.IR) []tableData {
 				Camel:    toCamel(col.Name),
 				GoType:   col.GoType,
 				Nullable: col.Nullable,
+				AutoIncrement: col.AutoIncrement,
+				Identity:      col.Identity,
 			})
 		}
 		for _, pk := range tbl.PrimaryKey {
@@ -190,6 +202,8 @@ func buildTables(ir schema.IR) []tableData {
 					Name:   col.Name,
 					Camel:  toCamel(col.Name),
 					GoType: col.GoType,
+					AutoIncrement: col.AutoIncrement,
+					Identity:      col.Identity,
 				})
 			}
 		}
@@ -277,6 +291,7 @@ func makeUniqueConstraint(tbl schema.Table, cols []string) (uniqueConstraint, bo
 			ColumnName: col.Name,
 			Camel:      camel,
 			GoType:     col.GoType,
+			Nullable:   col.Nullable,
 		})
 		typeParts = append(typeParts, camel)
 	}
@@ -288,6 +303,21 @@ func makeUniqueConstraint(tbl schema.Table, cols []string) (uniqueConstraint, bo
 		TypeName: typeName,
 		Fields:   fields,
 	}, true
+}
+
+func castInt64(goType, value string) string {
+	switch goType {
+	case "int64":
+		return value
+	case "int32":
+		return fmt.Sprintf("int32(%s)", value)
+	case "uint64":
+		return fmt.Sprintf("uint64(%s)", value)
+	case "string":
+		return fmt.Sprintf("strconv.FormatInt(%s, 10)", value)
+	default:
+		return fmt.Sprintf("%s(%s)", goType, value)
+	}
 }
 
 func buildRelations(tbl schema.Table, modelNames map[string]string, tableRefs map[string]*schema.Table, reach map[string]map[string]bool) []relationData {
@@ -316,9 +346,10 @@ func buildRelations(tbl schema.Table, modelNames map[string]string, tableRefs ma
 		if targetModel == "" {
 			continue
 		}
+		childTable := tableRefs[targetKey]
 		targetTable := rel.To
-		if t := tableRefs[targetKey]; t != nil {
-			targetTable = t.Name
+		if childTable != nil {
+			targetTable = childTable.Name
 		}
 		selectArgsName := fmt.Sprintf("%s%sSelectArgs", tableModel, fieldName)
 		allowSelectAll := true
@@ -338,10 +369,63 @@ func buildRelations(tbl schema.Table, modelNames map[string]string, tableRefs ma
 			LocalKeys:      append([]string(nil), rel.LocalKeys...),
 			ForeignKeys:    append([]string(nil), rel.ForeignKeys...),
 			AllowSelectAll: allowSelectAll,
+			InheritedKeys:  buildInheritedKeys(&tbl, childTable, rel),
 		})
 		seen[key] = struct{}{}
 	}
 	return relations
+}
+
+func buildInheritedKeys(parent *schema.Table, child *schema.Table, rel schema.Relation) []inheritedKey {
+	if parent == nil || child == nil {
+		return nil
+	}
+	kind := strings.ToLower(rel.Kind)
+	if kind != "hasmany" && kind != "hasone" {
+		return nil
+	}
+	var inherits []inheritedKey
+	seen := make(map[string]struct{})
+	for _, parentRel := range parent.Relations {
+		if strings.ToLower(parentRel.Kind) != "belongsto" {
+			continue
+		}
+		target := strings.ToLower(parentRel.To)
+		if target == "" || len(parentRel.LocalKeys) == 0 {
+			continue
+		}
+		for _, childRel := range child.Relations {
+			if strings.ToLower(childRel.Kind) != "belongsto" {
+				continue
+			}
+			if strings.ToLower(childRel.To) != target {
+				continue
+			}
+			if len(childRel.LocalKeys) != len(parentRel.LocalKeys) {
+				continue
+			}
+			for i := range childRel.LocalKeys {
+				parentKey := parentRel.LocalKeys[i]
+				childKey := childRel.LocalKeys[i]
+				if parentKey == "" || childKey == "" {
+					continue
+				}
+				key := strings.ToLower(parentKey) + "|" + strings.ToLower(childKey)
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				inherits = append(inherits, inheritedKey{
+					ParentField: toCamel(parentKey),
+					ChildField:  toCamel(childKey),
+				})
+			}
+		}
+	}
+	if len(inherits) == 0 {
+		return nil
+	}
+	return inherits
 }
 
 func computeReachability(ir schema.IR) map[string]map[string]bool {
