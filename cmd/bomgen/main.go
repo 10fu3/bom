@@ -14,6 +14,7 @@ import (
 	"bom/internal/config"
 	parseriface "bom/internal/parser"
 	parsermysql "bom/internal/parser/mysql"
+	parserpostgres "bom/internal/parser/postgres"
 	parsersqlite "bom/internal/parser/sqlite"
 	"bom/internal/schema"
 )
@@ -90,6 +91,8 @@ func selectParser(name string) parseriface.DDLParser {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "sqlite":
 		return parsersqlite.New()
+	case "postgres":
+		return parserpostgres.New()
 	default:
 		return parsermysql.New()
 	}
