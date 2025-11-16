@@ -55,6 +55,10 @@ func main() {
 		log.Fatalf("assoc resolve: %v", err)
 	}
 
+	if err := applyIdentityConfig(&resolved, cfg.Identity); err != nil {
+		log.Fatalf("identity config: %v", err)
+	}
+
 	target := *outDir
 	if cfg.Output.Root != "" {
 		target = cfg.Output.Root
@@ -101,4 +105,50 @@ func selectParser(name string) parseriface.DDLParser {
 	default:
 		return parsermysql.New()
 	}
+}
+
+func applyIdentityConfig(ir *schema.IR, identities map[string]map[string]string) error {
+	if ir == nil || len(identities) == 0 {
+		return nil
+	}
+	for tableName, cols := range identities {
+		if cols == nil {
+			continue
+		}
+		table := lookupTable(ir, tableName)
+		if table == nil {
+			return fmt.Errorf("identity: unknown table %q", tableName)
+		}
+		for colName, strategy := range cols {
+			if idx := columnIndex(table.Columns, colName); idx >= 0 {
+				table.Columns[idx].Identity = strings.TrimSpace(strings.ToLower(strategy))
+			} else {
+				return fmt.Errorf("identity: unknown column %q.%q", tableName, colName)
+			}
+		}
+	}
+	return nil
+}
+
+func lookupTable(ir *schema.IR, name string) *schema.Table {
+	if ir == nil {
+		return nil
+	}
+	lower := strings.ToLower(name)
+	for i := range ir.Tables {
+		if strings.ToLower(ir.Tables[i].Name) == lower {
+			return &ir.Tables[i]
+		}
+	}
+	return nil
+}
+
+func columnIndex(cols []schema.Column, name string) int {
+	lower := strings.ToLower(name)
+	for i := range cols {
+		if strings.ToLower(cols[i].Name) == lower {
+			return i
+		}
+	}
+	return -1
 }

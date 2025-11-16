@@ -16,6 +16,7 @@ type Config struct {
 	Alias           AliasConfig
 	Associations    map[string][]Association
 	AllowNullUnique bool
+	Identity        map[string]map[string]string
 }
 
 type OutputConfig struct {
@@ -38,11 +39,13 @@ type Association struct {
 func Parse(r io.Reader) (Config, error) {
 	var cfg Config
 	cfg.Associations = make(map[string][]Association)
+	cfg.Identity = make(map[string]map[string]string)
 
 	scanner := bufio.NewScanner(r)
 	block := ""
 	var assocTable string
 	var currentAssoc *Association
+	var identityTable string
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -64,10 +67,14 @@ func Parse(r io.Reader) (Config, error) {
 		case indent == 0 && trimmed == "associations:":
 			block = "associations"
 			continue
+		case indent == 0 && trimmed == "identity:":
+			block = "identity"
+			continue
 		case indent == 0:
 			block = ""
 			assocTable = ""
 			currentAssoc = nil
+			identityTable = ""
 		}
 
 		switch block {
@@ -110,6 +117,24 @@ func Parse(r io.Reader) (Config, error) {
 			}
 			if indent >= 6 && currentAssoc != nil {
 				parseAssocField(currentAssoc, trimmed)
+			}
+		case "identity":
+			if indent == 2 {
+				key, val := splitKeyValue(trimmed)
+				identityTable = key
+				if val == "{}" || val == "" {
+					cfg.Identity[identityTable] = make(map[string]string)
+				}
+				continue
+			}
+			if indent >= 4 && identityTable != "" {
+				key, val := splitKeyValue(trimmed)
+				if key != "" && val != "" {
+					if cfg.Identity[identityTable] == nil {
+						cfg.Identity[identityTable] = make(map[string]string)
+					}
+					cfg.Identity[identityTable][key] = val
+				}
 			}
 		default:
 			key, val := splitKeyValue(trimmed)
