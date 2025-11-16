@@ -4,6 +4,7 @@ go 1.24.2
 
 require (
 	github.com/go-sql-driver/mysql v1.7.2-0.20231213112541-0004702b931d
+	github.com/lib/pq v1.10.9
 	github.com/pingcap/tidb/parser v0.0.0-20231013125129-93a834a6bf8d
 	golang.org/x/tools v0.36.0
 	modernc.org/golex v1.1.0
