@@ -1,8 +1,8 @@
 output:
-  root: ./examples/basic/generated
+  root: ./examples/sqlite/generated
 
 dialect: sqlite
-include_tables: [author, video]
+include_tables: [author, author_profile, video, comment, tag, video_tag]
 
 associations:
   author:
@@ -10,6 +10,11 @@ associations:
       to: video
       local_keys: [id]
       foreign_keys: [author_id]
+  author_profile:
+    - type: BelongsTo
+      to: author
+      local_keys: [author_id]
+      foreign_keys: [id]
   video:
     - type: BelongsTo
       to: author

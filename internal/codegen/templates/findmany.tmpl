@@ -14,8 +14,6 @@ import (
 	{{ .DialectImportAlias }} "{{ .DialectImportPath }}"
 )
 
-var activeDialect dialect.Dialect = {{ .DialectInit }}
-
 type OrderDirection string
 
 const (
@@ -97,6 +95,23 @@ func jsonPair(key, expr string) string {
 	return fmt.Sprintf("'%s', %s", safe, expr)
 }
 
+func normalizeJSONRaw(raw json.RawMessage) json.RawMessage {
+	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
+		var decoded string
+		if err := json.Unmarshal(raw, &decoded); err == nil {
+			return json.RawMessage(decoded)
+		}
+	}
+	return raw
+}
+
+func wrapJSONValue(d dialect.Dialect, expr string) string {
+	if expr == "" {
+		return expr
+	}
+	return d.JSONValue(expr)
+}
+
 func convertOpt(v opt.Opt[int]) *int64 {
 	if !v.IsSome() {
 		return nil
@@ -176,6 +191,7 @@ type {{ .ModelName }}OrderByInput struct {
 type {{ $model }}{{ .FieldName }}Relation struct {
 	Some *{{ .TargetModel }}WhereInput
 	None *{{ .TargetModel }}WhereInput
+	Every *{{ .TargetModel }}WhereInput
 }
 {{- end }}
 
@@ -289,6 +305,11 @@ func build{{ $model }}{{ .FieldName }}Relation(d dialect.Dialect, parentAlias st
 			preds = append(preds, clause)
 		}
 	}
+	if rel.Every != nil {
+		if clause := build{{ $model }}{{ .FieldName }}RelationEvery(d, parentAlias, args, rel.Every); clause != "" {
+			preds = append(preds, clause)
+		}
+	}
 	if len(preds) == 0 {
 		return ""
 	}
@@ -324,7 +345,29 @@ func build{{ $model }}{{ .FieldName }}RelationExists(d dialect.Dialect, parentAl
 	if negate {
 		return fmt.Sprintf("NOT EXISTS (%s)", expr)
 	}
-	return fmt.Sprintf("EXISTS (%s)", expr)
+		return fmt.Sprintf("EXISTS (%s)", expr)
+	}
+
+func build{{ $model }}{{ .FieldName }}RelationEvery(d dialect.Dialect, parentAlias string, args *argState, where *{{ .TargetModel }}WhereInput) string {
+	childAlias := parentAlias + "_{{ lowerFirst .FieldName }}" + "_every"
+	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("{{ .TargetTable }}"), d.QuoteIdent(childAlias))
+	joinConds := make([]string, 0, {{ len .ForeignKeys }})
+	{{- $rel := . -}}
+	{{- range $idx, $fk := .ForeignKeys }}
+	joinConds = append(joinConds, columnEquals(d, childAlias, "{{ $fk }}", parentAlias, "{{ index $rel.LocalKeys $idx }}"))
+	{{- end }}
+	var negated string
+	if whereClause := build{{ .TargetModel }}Where(d, childAlias, args, where); whereClause != "" {
+		negated = d.Not(whereClause)
+	} else {
+		negated = "0=1"
+	}
+	var combined []string
+	if len(joinConds) > 0 {
+		combined = append(combined, strings.Join(joinConds, " AND "))
+	}
+	combined = append(combined, negated)
+	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE %s)", tableRef, strings.Join(combined, " AND "))
 }
 {{- end }}
 
@@ -378,13 +421,15 @@ func build{{ .ModelName }}JSONExpr(d dialect.Dialect, alias string, args *argSta
 		{{- end }}
 		{{- if .Relations }}
 		{{- range .Relations }}
-		expr, err := build{{ $model }}{{ .FieldName }}JSON(d, alias, args, &{{ .SelectArgsName }}{
-			Select: {{ .TargetModel }}SelectAll,
-		})
-		if err != nil {
-			return "", err
+		{
+			expr, err := build{{ $model }}{{ .FieldName }}JSON(d, alias, args, &{{ .SelectArgsName }}{
+				Select: {{ .TargetModel }}SelectAll,
+			})
+			if err != nil {
+				return "", err
+			}
+			pairs = append(pairs, jsonPair("{{ lowerFirst .FieldName }}", wrapJSONValue(d, expr)))
 		}
-		pairs = append(pairs, jsonPair("{{ lowerFirst .FieldName }}", expr))
 		{{- end }}
 		{{- end }}
 	} else {
@@ -409,11 +454,13 @@ func build{{ .ModelName }}JSONExpr(d dialect.Dialect, alias string, args *argSta
 					continue
 				}
 				relationSeen["{{ .FieldName }}"] = struct{}{}
-				expr, err := build{{ $model }}{{ .FieldName }}JSON(d, alias, args, &v.Args)
-				if err != nil {
-					return "", err
+				{
+					expr, err := build{{ $model }}{{ .FieldName }}JSON(d, alias, args, &v.Args)
+					if err != nil {
+						return "", err
+					}
+					pairs = append(pairs, jsonPair("{{ lowerFirst .FieldName }}", wrapJSONValue(d, expr)))
 				}
-				pairs = append(pairs, jsonPair("{{ lowerFirst .FieldName }}", expr))
 			{{- end }}
 			}
 		}
@@ -434,6 +481,7 @@ func build{{ $model }}{{ .FieldName }}JSON(d dialect.Dialect, parentAlias string
 	if err != nil {
 		return "", err
 	}
+	childJSON = wrapJSONValue(d, childJSON)
 	joinConds := make([]string, 0, {{ len .ForeignKeys }})
 	{{- $rel := . -}}
 	{{- range $idx, $fk := .ForeignKeys }}
@@ -486,13 +534,14 @@ func build{{ $model }}{{ .FieldName }}JSON(d dialect.Dialect, parentAlias string
 {{- end }}
 
 func FindMany{{ .ModelName }}[T {{ .ModelName }}Model](ctx context.Context, db bom.Querier, q {{ .ModelName }}FindMany) ([]T, error) {
-	d := activeDialect
+	d := {{ $.DialectInit }}
 	state := newArgState(d)
 	rootAlias := "t0"
 	jsonExpr, err := build{{ .ModelName }}JSONExpr(d, rootAlias, state, q.Select)
 	if err != nil {
 		return nil, err
 	}
+	jsonExpr = wrapJSONValue(d, jsonExpr)
 	whereClause := build{{ .ModelName }}Where(d, rootAlias, state, q.Where)
 	input := planner.FindManyInput{
 		Table: "{{ .TableName }}",
@@ -555,6 +604,7 @@ func query{{ .ModelName }}Rows[T {{ .ModelName }}Model](ctx context.Context, db 
 				return nil, err
 			}
 			for _, item := range payload {
+				item = normalizeJSONRaw(item)
 				var rec {{ .ModelName }}
 				if err := json.Unmarshal(item, &rec); err != nil {
 					return nil, err
@@ -575,6 +625,7 @@ func query{{ .ModelName }}Rows[T {{ .ModelName }}Model](ctx context.Context, db 
 		if len(raw) == 0 {
 			raw = []byte("{}")
 		}
+		raw = normalizeJSONRaw(raw)
 		var rec {{ .ModelName }}
 		if err := json.Unmarshal(raw, &rec); err != nil {
 			return nil, err

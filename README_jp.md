@@ -84,7 +84,7 @@ go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
 
 ## クエリ記述上のヒント
 - `SelectAll` はスカラー列のみを含みます。リレーションを取りたい場合は `ModelSelectRelation{ Args: ... }` を手動で追加してください。
-- `Where` は `AND` / `OR` / `NOT` / リレーションフィルタ / `opt.Opt[T]` を組み合わせ可能。
+- `Where` は `AND` / `OR` / `NOT` / リレーションフィルタ (`Some`/`None`/`Every`) / `opt.Opt[T]` を組み合わせ可能。
 - `FindUnique` は `ModelFindUnique[ModelUK_*]` のジェネリクスでユニークキーを限定します。
 - `pkg/dialect/*` の実装は `activeDialect` から差し替え可能なため、アプリ側で `postgres.New()` などを設定して使えます。
 
@@ -93,6 +93,23 @@ go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
 |- カラム・テーブル名は列挙型 + Dialect の `QuoteIdent` で必ずエスケープされ、ORDER BY / DISTINCT でも安全です。
 - JSON キーは生成時にサニタイズし、各 Dialect の `JSON_OBJECT` 系 API を使用します。
 - `FindMany` ではサブクエリ＋ `JSON_ARRAYAGG` で結果を 1 レコードにまとめる方式を採用しており、アプリ側で配列展開するだけで済みます。
+
+## 実 DB での統合テスト
+- SQLite (modernc.org/sqlite)
+  ```bash
+  go get modernc.org/sqlite@latest
+  go test -tags moderncsqlite ./examples/sqlite
+  ```
+- MySQL (Docker)
+  ```bash
+  scripts/run_mysql_integration.sh
+  ```
+  （`examples/mysql/docker/mysql/Dockerfile` でイメージをビルドし、`--tmpfs /var/lib/mysql` 付きでコンテナを起動して `TEST_MYSQL_DSN` を設定し、`go test -tags mysqlserver ./examples/mysql` を実行します。ホスト側のポートを変える場合は `HOST_PORT=3307 scripts/run_mysql_integration.sh` のように指定してください。）
+- PostgreSQL (Docker)
+  ```bash
+  scripts/run_postgres_integration.sh
+  ```
+  （`examples/postgres/docker/postgres/Dockerfile` でイメージをビルドし、`--tmpfs /var/lib/postgresql/data` 付きでコンテナを起動して `TEST_POSTGRES_DSN` を設定し、`go test -tags postgresserver ./examples/postgres` を実行します。ホスト側のポートを変える場合は `PG_HOST_PORT=5433 scripts/run_postgres_integration.sh` のように指定してください。）
 
 ## 制限と今後の予定
 - 書き込み系 (INSERT/UPDATE/DELETE) は非対応です。

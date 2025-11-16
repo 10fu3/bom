@@ -69,7 +69,7 @@ func TestBuildFindManyJSONArray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build failed: %v", err)
 	}
-	expect := "SELECT COALESCE(JSON_ARRAYAGG(r.__bom_json), JSON_ARRAY()) AS __bom_json FROM (SELECT t0.`id` AS `__bom_json` FROM `video` AS `t0`) AS r"
+	expect := "SELECT COALESCE(JSON_ARRAYAGG(`r`.`__bom_json`), JSON_ARRAY()) AS `__bom_json` FROM (SELECT t0.`id` AS `__bom_json` FROM `video` AS `t0`) AS `r`"
 	if sql != expect {
 		t.Fatalf("unexpected sql:\n got %s\nwant %s", sql, expect)
 	}
