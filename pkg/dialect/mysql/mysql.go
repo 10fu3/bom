@@ -58,6 +58,10 @@ func (mysqlDialect) CoalesceJSONAgg(expr, empty string) string {
 	return fmt.Sprintf("COALESCE(%s, %s)", expr, empty)
 }
 
+func (mysqlDialect) JSONValue(expr string) string {
+	return expr
+}
+
 func (mysqlDialect) LimitOffset(limit, offset *int64) string {
 	switch {
 	case limit == nil && offset == nil:

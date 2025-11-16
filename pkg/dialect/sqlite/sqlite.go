@@ -58,6 +58,10 @@ func (sqliteDialect) CoalesceJSONAgg(expr, empty string) string {
 	return fmt.Sprintf("COALESCE(%s, %s)", expr, empty)
 }
 
+func (sqliteDialect) JSONValue(expr string) string {
+	return fmt.Sprintf("json(%s)", expr)
+}
+
 func (sqliteDialect) LimitOffset(limit, offset *int64) string {
 	switch {
 	case limit == nil && offset == nil:

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"go/format"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,7 +67,11 @@ func (g *Generator) Generate(ir schema.IR, outDir string, dialectName string) er
 	if err := g.tmpl.Execute(&buf, data); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(outDir, "generated.go"), buf.Bytes(), 0o644)
+	src, err := format.Source(buf.Bytes())
+	if err != nil {
+		return fmt.Errorf("format generated code: %w", err)
+	}
+	return os.WriteFile(filepath.Join(outDir, "generated.go"), src, 0o644)
 }
 
 type tableData struct {

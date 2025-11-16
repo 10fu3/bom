@@ -40,7 +40,7 @@ func build{{ .TypeName }}Predicate(w *whereBuilder, where {{ .TypeName }}) strin
 {{ end }}
 
 func FindUnique{{ .ModelName }}[T {{ .ModelName }}Model, U {{ .ModelName }}Unique](ctx context.Context, db bom.Querier, q {{ .ModelName }}FindUnique[U]) (*T, error) {
-	d := activeDialect
+	d := {{ $.DialectInit }}
 	state := newArgState(d)
 	alias := "t0"
 	whereClause, err := build{{ .ModelName }}UniquePredicate(d, alias, state, q.Where)
@@ -51,6 +51,7 @@ func FindUnique{{ .ModelName }}[T {{ .ModelName }}Model, U {{ .ModelName }}Uniqu
 	if err != nil {
 		return nil, err
 	}
+	jsonExpr = wrapJSONValue(d, jsonExpr)
 	input := planner.FindManyInput{
 		Table: "{{ .TableName }}",
 		Alias: alias,

@@ -53,11 +53,15 @@ func (postgresDialect) JSONArrayAgg(expr string) string {
 }
 
 func (postgresDialect) JSONArrayEmpty() string {
-	return "'[]'::jsonb"
+	return "'[]'::json"
 }
 
 func (postgresDialect) CoalesceJSONAgg(expr, empty string) string {
 	return fmt.Sprintf("COALESCE(%s, %s)", expr, empty)
+}
+
+func (postgresDialect) JSONValue(expr string) string {
+	return fmt.Sprintf("(%s)::json", expr)
 }
 
 func (postgresDialect) LimitOffset(limit, offset *int64) string {

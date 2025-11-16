@@ -37,6 +37,7 @@ type Dialect interface {
 	JSONArrayAgg(expr string) string
 	JSONArrayEmpty() string
 	CoalesceJSONAgg(expr, empty string) string
+	JSONValue(expr string) string
 
 	LimitOffset(limit, offset *int64) string
 	DistinctProjection(cols []string) (prefix string, needsWrap bool)

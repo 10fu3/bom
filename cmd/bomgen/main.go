@@ -23,6 +23,7 @@ func main() {
 	var ddlPath = flag.String("ddl", "./schema.sql", "path to DDL file")
 	var configPath = flag.String("config", "./bom.yml", "path to configuration")
 	var outDir = flag.String("out", "./pkg/generated", "output directory for generated code")
+	var parserOverride = flag.String("parser", "", "optional parser dialect override (mysql/postgres/sqlite)")
 	flag.Parse()
 
 	ddl, err := os.ReadFile(*ddlPath)
@@ -39,7 +40,11 @@ func main() {
 		log.Fatalf("config parse failed: %v", err)
 	}
 
-	parser := selectParser(cfg.Dialect)
+	parserName := cfg.Dialect
+	if override := strings.TrimSpace(*parserOverride); override != "" {
+		parserName = override
+	}
+	parser := selectParser(parserName)
 	ir, err := parser.Parse(context.Background(), string(ddl))
 	if err != nil {
 		log.Fatalf("parse failed: %v", err)

@@ -79,6 +79,9 @@ func BuildFindMany(d dialect.Dialect, in FindManyInput) (string, []any, error) {
 	if !in.JSONArray {
 		return sqlStr, in.Args, nil
 	}
-	agg := fmt.Sprintf("SELECT COALESCE(JSON_ARRAYAGG(r.__bom_json), JSON_ARRAY()) AS __bom_json FROM (%s) AS r", sqlStr)
+	jsonCol := fmt.Sprintf("%s.%s", d.QuoteIdent("r"), d.QuoteIdent("__bom_json"))
+	aggExpr := d.CoalesceJSONAgg(d.JSONArrayAgg(jsonCol), d.JSONArrayEmpty())
+	aggExpr = d.JSONValue(aggExpr)
+	agg := fmt.Sprintf("SELECT %s AS %s FROM (%s) AS %s", aggExpr, d.QuoteIdent("__bom_json"), sqlStr, d.QuoteIdent("r"))
 	return agg, in.Args, nil
 }
