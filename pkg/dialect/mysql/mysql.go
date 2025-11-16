@@ -20,6 +20,8 @@ func (mysqlDialect) Cap() dialect.Capabilities {
 		DistinctOn:      false,
 		CaseInsensitive: dialect.LowerLike,
 		Placeholder:     "?",
+		InsertReturning: false,
+		MaxParameters:   65535,
 	}
 }
 

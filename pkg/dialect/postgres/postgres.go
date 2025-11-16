@@ -20,6 +20,8 @@ func (postgresDialect) Cap() dialect.Capabilities {
 		DistinctOn:      true,
 		CaseInsensitive: dialect.ILike,
 		Placeholder:     "$n",
+		InsertReturning: true,
+		MaxParameters:   65535,
 	}
 }
 

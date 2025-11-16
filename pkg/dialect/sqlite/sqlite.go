@@ -20,6 +20,8 @@ func (sqliteDialect) Cap() dialect.Capabilities {
 		DistinctOn:      false,
 		CaseInsensitive: dialect.CollateCI,
 		Placeholder:     "?",
+		InsertReturning: false,
+		MaxParameters:   999,
 	}
 }
 
