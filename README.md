@@ -43,31 +43,38 @@ go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
    The generator parses the schema, resolves relations, and emits:
    ```
    pkg/generated/
-     author.go
-     video.go
-     generated.go   # shared helpers (arg state, planner integration, JSON shaping)
+     generated.go   # models, inputs, relation helpers, planner bridge
    ```
 3. **Use the strongly typed API**
    ```go
-   package main
-
    import (
      "context"
-     "database/sql"
 
-     "bom/pkg/generated"
+     "bom/examples/sqlite/generated"
+     "bom/pkg/bom"
      "bom/pkg/opt"
    )
 
-   func listVideos(ctx context.Context, db *sql.DB) ([]generated.Video, error) {
-     query := generated.VideoFindMany{
-       Where: &generated.VideoWhereInput{
-         AuthorId: opt.OVal(uint64(1)),
+   func sampleHasOne(ctx context.Context, db bom.Querier) {
+     generated.FindManyAuthor[generated.Author](ctx, db, generated.AuthorFindMany{
+       Select: generated.AuthorSelect{
+         generated.AuthorFieldName,
+         generated.AuthorSelectAuthorProfile{ // HasOne 取得
+           Args: generated.AuthorAuthorProfileSelectArgs{
+             Select: generated.AuthorProfileSelect{
+               generated.AuthorProfileFieldAvatarUrl,
+             },
+           },
+         },
        },
+     })
+   }
+
+   func sampleBelongsTo(ctx context.Context, db bom.Querier) {
+     generated.FindManyVideo[generated.Video](ctx, db, generated.VideoFindMany{
        Select: generated.VideoSelect{
-         generated.VideoFieldId,
          generated.VideoFieldTitle,
-         generated.VideoSelectAuthor{
+         generated.VideoSelectAuthor{ // BelongsTo 取得
            Args: generated.VideoAuthorSelectArgs{
              Select: generated.AuthorSelect{
                generated.AuthorFieldName,
@@ -75,8 +82,28 @@ go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
            },
          },
        },
-     }
-     return generated.FindManyVideo[generated.Video](ctx, db, query)
+     })
+   }
+
+   func sampleRelationFilters(ctx context.Context, db bom.Querier) {
+     generated.FindManyAuthor[generated.Author](ctx, db, generated.AuthorFindMany{
+       Where: &generated.AuthorWhereInput{
+         Video: &generated.AuthorVideoRelation{
+           Some: &generated.VideoWhereInput{ /* HasMany some */ },
+           None: &generated.VideoWhereInput{ /* HasMany none */ },
+           Every: &generated.VideoWhereInput{
+             Comment: &generated.VideoCommentRelation{
+               None: &generated.CommentWhereInput{
+                 Body: opt.OVal("spam"),
+               },
+             },
+           },
+         },
+       },
+       Select: generated.AuthorSelect{
+         generated.AuthorFieldName,
+       },
+     })
    }
    ```
 
@@ -93,7 +120,7 @@ go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
 
 ## Query model
 - `Select` values default to scalar columns only. To fetch relations, add `ModelSelectRelation{ Args: ... }`.
-- `Where` inputs support `AND`, `OR`, `NOT`, nested relation filters, and optional values via `opt.Opt[T]`.
+- `Where` inputs support `AND`, `OR`, `NOT`, nested relation filters (`Some`/`None`/`Every`), and optional values via `opt.Opt[T]`.
 - `FindUnique` takes `ModelFindUnique[ModelUK_X]` where `ModelUK_X` is a generated struct for each unique key.
 - Dialect implementations live under `pkg/dialect/*` and plug into generated code with an `activeDialect` variable you can override if needed.
 
@@ -102,6 +129,25 @@ go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
 - Identifier names (columns, tables, aliases) are generated enums and always quoted, removing injection vectors in ORDER BY/DISTINCT clauses.
 - JSON shape building uses dialect-specific functions and escapes JSON keys up front.
 - Queries can run as raw SELECTs or can wrap results into a top-level JSON array (for `FindMany` pagination helpers) without reflection.
+
+## Integration tests
+SQLite/MySQL 向けの実データベース検証はビルドタグで切り替えています。
+
+1. **SQLite (modernc.org/sqlite)**
+   ```bash
+   go get modernc.org/sqlite@latest
+   go test -tags moderncsqlite ./examples/sqlite
+   ```
+2. **MySQL (Docker)**
+   ```bash
+   scripts/run_mysql_integration.sh
+   ```
+   （`examples/mysql/docker/mysql/Dockerfile` でイメージをビルドし、`--tmpfs /var/lib/mysql` 付きでコンテナを起動したうえで `TEST_MYSQL_DSN` を設定し、`go test -tags mysqlserver ./examples/mysql` を実行します。ポートを変える場合は `HOST_PORT=3307 scripts/run_mysql_integration.sh` のように指定してください。）
+3. **PostgreSQL (Docker)**
+   ```bash
+   scripts/run_postgres_integration.sh
+   ```
+   （`examples/postgres/docker/postgres/Dockerfile` でイメージをビルドし、`--tmpfs /var/lib/postgresql/data` 付きでコンテナを起動したうえで `TEST_POSTGRES_DSN` を設定し、`go test -tags postgresserver ./examples/postgres` を実行します。ポートを変える場合は `PG_HOST_PORT=5433 scripts/run_postgres_integration.sh` のように指定してください。）
 
 ## Limitations & roadmap
 - Write operations (INSERT/UPDATE/DELETE) are intentionally out of scope.
