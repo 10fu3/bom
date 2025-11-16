@@ -1,10 +1,10 @@
 # Bom ORM
 
-Bom is a Go-first, read-only ORM that mirrors Prisma’s object style while preserving idiomatic Go APIs. It turns your database schema into strongly typed query builders, keeping SQL injection-proof statements and dialect-specific quirks behind a single interface.
+Bom is a Go-first ORM that mirrors Prisma’s object style while preserving idiomatic Go APIs. It turns your database schema into strongly typed query builders, keeping SQL injection-proof statements and dialect-specific quirks behind a single interface.
 
 ## Highlights
-- **Prisma-compatible inputs** – `Where`, `OrderBy`, `Select`, `Distinct`, `Take/Skip`, and nested relations expressed as plain Go structs (no fluent chaining).
-- **Read-only by design** – generated helpers cover `FindMany`, `FindFirst`, and `FindUnique`. Every query is parameterized and safe.
+- **Prisma-compatible inputs** – `Where`, `OrderBy`, `Select`, `Distinct`, `Take/Skip`, nested relations, and now `CreateOne` data all expressed as plain Go structs (no fluent chaining).
+- **Typed reads & creates** – generated helpers cover `FindMany`, `FindFirst`, `FindUnique`, plus Prisma-style `CreateOne`/`CreateMany` with nested relation inserts and auto ID generation (UUIDv4/v7, ULID, CUID, or auto-increment).
 - **Type-safe uniques** – each unique constraint gets its own struct plus a sum-type-style interface so `FindUnique` can only be called with supported keys.
 - **Dialect abstraction** – common interface for quoting, placeholders, JSON aggregation, case-insensitive LIKE, and `DISTINCT ON`. The generator wires in MySQL, PostgreSQL, or SQLite behavior without touching your application code.
 - **Schema-driven codegen** – `schema.sql` + `bom.yml` flow through a DDL parser, association resolver, planner, and Go template set to emit everything under `pkg/generated`.
@@ -105,6 +105,35 @@ go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
        },
      })
    }
+
+   func sampleCreate(ctx context.Context, db bom.Querier) (*generated.Author, error) {
+     return generated.CreateOneAuthor[generated.Author](ctx, db, generated.AuthorCreate{
+       Data: generated.AuthorCreateData{
+         Name:      opt.OVal("Carol"),
+         Email:     opt.OVal("carol@example.com"),
+         CreatedAt: opt.OVal("2024-02-03"),
+         Video: []generated.VideoCreateData{
+           {
+             Title:     opt.OVal("Nested"),
+             Slug:      opt.OVal("nested"),
+             CreatedAt: opt.OVal("2024-02-03"),
+           },
+         },
+       },
+       Select: generated.AuthorSelect{
+         generated.AuthorFieldId,
+         generated.AuthorFieldEmail,
+         generated.AuthorSelectVideo{
+           Args: generated.AuthorVideoSelectArgs{
+             Select: generated.VideoSelect{
+               generated.VideoFieldId,
+               generated.VideoFieldSlug,
+             },
+           },
+         },
+       },
+     })
+   }
    ```
 
 ## Configuration overview (`bom.yml`)
@@ -117,6 +146,7 @@ go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
 | `alias.strategy`  | Identifier shortening strategy (`base62`, etc.).                            |
 | `associations`    | Manual relation declarations when FK naming conventions are not enough.     |
 | `allow_null_unique` | Permit nullable columns inside unique constraints.                        |
+| `identity`        | Map of `table: { column: strategy }` for UUIDv4/UUIDv7/ULID/CUID auto-population. |
 
 ## Query model
 - `Select` values default to scalar columns only. To fetch relations, add `ModelSelectRelation{ Args: ... }`.

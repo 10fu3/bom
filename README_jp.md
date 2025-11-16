@@ -1,10 +1,10 @@
 # Bom ORM (日本語)
 
-Bom は Prisma 互換の入力モデルを Go 構造体で表現する、読み取り専用の軽量 ORM です。DDL と設定ファイルからコードを自動生成し、方言差分や SQL インジェクション対策をすべてライブラリ側で吸収します。
+Bom は Prisma 互換の入力モデルを Go 構造体で表現する軽量 ORM です。DDL と設定ファイルからコードを自動生成し、方言差分や SQL インジェクション対策をすべてライブラリ側で吸収します。
 
 ## 主な特徴
-- **Prisma と同じ概念**：`Where` / `OrderBy` / `Select` / `Distinct` / `Take` / `Skip` / ネストしたリレーションをチェーンではなく構造体で記述。
-- **読み取り専用**：`FindMany` / `FindFirst` / `FindUnique` のみを提供し、全クエリはプレースホルダ付きで安全に発行。
+- **Prisma と同じ概念**：`Where` / `OrderBy` / `Select` / `Distinct` / `Take` / `Skip` / ネストしたリレーション / `CreateOne` / `CreateMany` の入力を構造体で記述。
+- **読み書きサポート**：`FindMany` / `FindFirst` / `FindUnique` に加え、ネストした `CreateOne` / `CreateMany` (AUTO_INCREMENT / UUIDv4/v7 / ULID / CUID 自動採番) を安全に実行。
 - **型安全なユニーク検索**：ユニーク制約ごとに専用構造体 + インターフェースを生成するため、誤ったキーで `FindUnique` を呼べません。
 - **Dialect 抽象化**：識別子の引用・プレースホルダ・JSON 集計・ILIKE/LcLike・`DISTINCT ON` などの差分を `pkg/dialect/*` が担当。
 - **スキーマ駆動コード生成**：DDL→AST→IR→アソシエーション解決→Go テンプレートというパイプラインで `pkg/generated` を構築。
@@ -69,6 +69,49 @@ go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
      }
      return generated.FindManyVideo[generated.Video](ctx, db, q)
    }
+
+   func createAuthor(ctx context.Context, db *sql.DB) (*generated.Author, error) {
+     return generated.CreateOneAuthor[generated.Author](ctx, db, generated.AuthorCreate{
+       Data: generated.AuthorCreateData{
+         Name:      opt.OVal("Carol"),
+         Email:     opt.OVal("carol@example.com"),
+         CreatedAt: opt.OVal("2024-02-03"),
+       },
+       Select: generated.AuthorSelect{
+         generated.AuthorFieldId,
+         generated.AuthorFieldEmail,
+       },
+     })
+   }
+
+   func createAuthor(ctx context.Context, db *sql.DB) (*generated.Author, error) {
+     return generated.CreateOneAuthor[generated.Author](ctx, db, generated.AuthorCreate{
+       Data: generated.AuthorCreateData{
+         Name:      opt.OVal("Carol"),
+         Email:     opt.OVal("carol@example.com"),
+         CreatedAt: opt.OVal("2024-02-03"),
+         Video: []generated.VideoCreateData{
+           {
+             Title:     opt.OVal("Nested"),
+             Slug:      opt.OVal("nested"),
+             CreatedAt: opt.OVal("2024-02-03"),
+           },
+         },
+       },
+       Select: generated.AuthorSelect{
+         generated.AuthorFieldId,
+         generated.AuthorFieldEmail,
+         generated.AuthorSelectVideo{
+           Args: generated.AuthorVideoSelectArgs{
+             Select: generated.VideoSelect{
+               generated.VideoFieldId,
+               generated.VideoFieldSlug,
+             },
+           },
+         },
+       },
+     })
+   }
    ```
 
 ## `bom.yml` の主なキー
@@ -81,6 +124,7 @@ go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
 | `alias.strategy`     | 長い識別子を短縮する戦略名。                                         |
 | `associations`       | FK では判別できないリレーションを手動で宣言。                         |
 | `allow_null_unique`  | ユニーク制約に NULL 許容列を含める場合に `true`。                    |
+| `identity`           | `table: { column: strategy }` 形式で UUIDv4/UUIDv7/ULID/CUID を自動採番。 |
 
 ## クエリ記述上のヒント
 - `SelectAll` はスカラー列のみを含みます。リレーションを取りたい場合は `ModelSelectRelation{ Args: ... }` を手動で追加してください。
@@ -112,7 +156,7 @@ go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
   （`examples/postgres/docker/postgres/Dockerfile` でイメージをビルドし、`--tmpfs /var/lib/postgresql/data` 付きでコンテナを起動して `TEST_POSTGRES_DSN` を設定し、`go test -tags postgresserver ./examples/postgres` を実行します。ホスト側のポートを変える場合は `PG_HOST_PORT=5433 scripts/run_postgres_integration.sh` のように指定してください。）
 
 ## 制限と今後の予定
-- 書き込み系 (INSERT/UPDATE/DELETE) は非対応です。
+- 書き込み系は `CreateOne` (INSERT) のみ対応。UPDATE/DELETE は未サポートです。
 - `bomgen` が使用する DDL パーサは MySQL(TiDB) と goyacc 製 SQLite を同梱。PostgreSQL 連携は作業中です。
 - `SelectAll` にリレーションは含まれません。循環参照を避けるための仕様です。
 
