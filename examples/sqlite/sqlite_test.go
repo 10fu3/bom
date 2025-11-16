@@ -26,4 +26,5 @@ func TestGeneratedQueriesExecuteOnSQLite(t *testing.T) {
 	}
 
 	runRelationQueryAssertions(t, ctx, &sqlQuerier{db: db})
+	runCreateAssertions(t, ctx, &sqlQuerier{db: db})
 }

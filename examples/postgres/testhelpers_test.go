@@ -128,10 +128,12 @@ type sqlQuerier struct {
 }
 
 func (s *sqlQuerier) QueryContext(ctx context.Context, query string, args ...any) (bom.RowsPublic, error) {
+	logSQL("QUERY", query, args)
 	return s.db.QueryContext(ctx, query, args...)
 }
 
 func (s *sqlQuerier) ExecContext(ctx context.Context, query string, args ...any) (bom.Result, error) {
+	logSQL("EXEC", query, args)
 	res, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
