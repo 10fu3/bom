@@ -9,6 +9,16 @@ DDL="${ROOT_DIR}/examples/postgres/schema.sql"
 CONFIG_POSTGRES="${ROOT_DIR}/examples/postgres/bom.yml"
 GOCACHE_DIR="${GOCACHE:-${ROOT_DIR}/.gocache}"
 
+# Enable SQL debug logging unless explicitly disabled.
+if [[ -z "${BOM_DEBUG_SQL:-}" ]]; then
+  if [[ -n "${SQL_DEBUG:-}" ]]; then
+    export BOM_DEBUG_SQL="${SQL_DEBUG}"
+  else
+    export BOM_DEBUG_SQL=1
+  fi
+fi
+echo "BOM_DEBUG_SQL=${BOM_DEBUG_SQL} (SQL statements will be logged)"
+
 docker build -t "${IMAGE_NAME}" \
   -f "${ROOT_DIR}/examples/postgres/docker/postgres/Dockerfile" \
   "${ROOT_DIR}/examples/postgres/docker/postgres"
@@ -37,4 +47,4 @@ fi
 
 export TEST_POSTGRES_DSN="postgres://postgres@127.0.0.1:${HOST_PORT}/bom_test?sslmode=disable"
 cd "${ROOT_DIR}"
-GOCACHE="${GOCACHE_DIR}" go test -tags postgresserver ./examples/postgres
+GOCACHE="${GOCACHE_DIR}" go test -v -count=1 -tags postgresserver ./examples/postgres

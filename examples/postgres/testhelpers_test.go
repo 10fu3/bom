@@ -3,6 +3,8 @@ package postgres_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -14,6 +16,29 @@ import (
 type stmtData struct {
 	sql  string
 	args []any
+}
+
+var sqlDebugEnabled = func() bool {
+	val := strings.TrimSpace(os.Getenv("BOM_DEBUG_SQL"))
+	if val == "" {
+		return false
+	}
+	switch strings.ToLower(val) {
+	case "1", "true", "t", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}()
+
+func logSQL(kind, query string, args []any) {
+	if !sqlDebugEnabled {
+		return
+	}
+	fmt.Printf("[BOM DEBUG] %s: %s\n", kind, query)
+	if len(args) > 0 {
+		fmt.Printf("[BOM DEBUG] args: %#v\n", args)
+	}
 }
 
 var postgresDropTablesSQL = strings.Join([]string{
@@ -197,5 +222,148 @@ func runRelationQueryAssertions(t *testing.T, ctx context.Context, querier bom.Q
 	}
 	if len(authorsEvery) != 1 || authorsEvery[0].Id != 2 {
 		t.Fatalf("expected only author 2 for EVERY, got %#v", authorsEvery)
+	}
+}
+
+func runCreateAssertions(t *testing.T, ctx context.Context, querier bom.Querier) {
+	t.Helper()
+
+	createdAuthor, err := generated.CreateOneAuthor[generated.Author](ctx, querier, generated.AuthorCreate{
+		Data: generated.AuthorCreateData{
+			Id:        opt.OVal(int64(99)),
+			Name:      opt.OVal("Carol"),
+			Email:     opt.OVal("carol@example.com"),
+			CreatedAt: opt.OVal("2024-02-01"),
+		},
+		Select: generated.AuthorSelect{
+			generated.AuthorFieldId,
+			generated.AuthorFieldName,
+			generated.AuthorFieldEmail,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateOneAuthor failed: %v", err)
+	}
+	if createdAuthor == nil || createdAuthor.Id != 99 {
+		t.Fatalf("unexpected author create result: %#v", createdAuthor)
+	}
+
+	_, err = generated.CreateOneVideo[generated.Video](ctx, querier, generated.VideoCreate{
+		Data: generated.VideoCreateData{
+			Id:          opt.OVal(int64(50)),
+			Title:       opt.OVal("New Post"),
+			Slug:        opt.OVal("new-post"),
+			AuthorId:    opt.OVal(createdAuthor.Id),
+			Description: opt.OVal("launch"),
+			CreatedAt:   opt.OVal("2024-02-03"),
+		},
+		Select: generated.VideoSelect{
+			generated.VideoFieldId,
+			generated.VideoFieldAuthorId,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateOneVideo failed: %v", err)
+	}
+
+	fetched, err := generated.FindUniqueVideo[generated.Video](ctx, querier, generated.VideoFindUnique[generated.VideoUK_Id]{
+		Where: generated.VideoUK_Id{Id: 50},
+		Select: generated.VideoSelect{
+			generated.VideoFieldId,
+			generated.VideoFieldAuthorId,
+			generated.VideoFieldSlug,
+		},
+	})
+	if err != nil {
+		t.Fatalf("FindUniqueVideo after create failed: %v", err)
+	}
+	if fetched == nil || fetched.Slug != "new-post" || fetched.AuthorId != createdAuthor.Id {
+		t.Fatalf("unexpected video after create: %#v", fetched)
+	}
+
+	tagRows := []generated.TagCreateData{
+		{
+			Id:   opt.OVal(int64(201)),
+			Name: opt.OVal("bulk-201"),
+		},
+		{
+			Id:   opt.OVal(int64(202)),
+			Name: opt.OVal("bulk-202"),
+		},
+	}
+	inserted, err := generated.CreateManyTag(ctx, querier, generated.TagCreateMany{
+		Data: tagRows,
+	})
+	if err != nil {
+		t.Fatalf("CreateManyTag failed: %v", err)
+	}
+	if inserted != int64(len(tagRows)) {
+		t.Fatalf("expected %d tags inserted, got %d", len(tagRows), inserted)
+	}
+	tag, err := generated.FindUniqueTag[generated.Tag](ctx, querier, generated.TagFindUnique[generated.TagUK_Id]{
+		Where: generated.TagUK_Id{Id: 201},
+		Select: generated.TagSelect{
+			generated.TagFieldId,
+			generated.TagFieldName,
+		},
+	})
+	if err != nil {
+		t.Fatalf("FindUniqueTag after CreateMany failed: %v", err)
+	}
+	if tag == nil || tag.Name != "bulk-201" {
+		t.Fatalf("unexpected tag after CreateMany: %#v", tag)
+	}
+
+	nestedAuthor, err := generated.CreateOneAuthor[generated.Author](ctx, querier, generated.AuthorCreate{
+		Data: generated.AuthorCreateData{
+			Id:        opt.OVal(int64(150)),
+			Name:      opt.OVal("NestedParent"),
+			Email:     opt.OVal("nested@example.com"),
+			CreatedAt: opt.OVal("2024-03-01"),
+			Video: []generated.VideoCreateData{
+				{
+					Id:        opt.OVal(int64(160)),
+					Title:     opt.OVal("Nested Child"),
+					Slug:      opt.OVal("nested-child"),
+					CreatedAt: opt.OVal("2024-03-02"),
+					Comment: []generated.CommentCreateData{
+						{
+							Id:        opt.OVal(int64(170)),
+							Body:      opt.OVal("nice"),
+							CreatedAt: opt.OVal("2024-03-03"),
+						},
+					},
+				},
+			},
+		},
+		Select: generated.AuthorSelect{
+			generated.AuthorFieldId,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateOneAuthor nested failed: %v", err)
+	}
+	if nestedAuthor == nil || nestedAuthor.Id != 150 {
+		t.Fatalf("unexpected nested author: %#v", nestedAuthor)
+	}
+	videoRecord, err := generated.FindUniqueVideo[generated.Video](ctx, querier, generated.VideoFindUnique[generated.VideoUK_Slug]{
+		Where: generated.VideoUK_Slug{Slug: "nested-child"},
+		Select: generated.VideoSelect{
+			generated.VideoFieldId,
+			generated.VideoFieldAuthorId,
+			generated.VideoSelectComment{
+				Args: generated.VideoCommentSelectArgs{
+					Select: generated.CommentSelect{
+						generated.CommentFieldBody,
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("FindUniqueVideo nested failed: %v", err)
+	}
+	if videoRecord == nil || len(videoRecord.Comment) != 1 || videoRecord.Comment[0].Body != "nice" {
+		t.Fatalf("nested relation not inserted: %#v", videoRecord)
 	}
 }
