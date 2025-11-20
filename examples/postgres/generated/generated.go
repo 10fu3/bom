@@ -5672,3 +5672,690 @@ func FindUniqueVideoTag[T VideoTagModel, U VideoTagUnique](ctx context.Context, 
 	out := rows[0]
 	return &out, nil
 }
+
+type AuthorUpdateData struct {
+	Id        opt.Opt[int64]
+	Name      opt.Opt[string]
+	Email     opt.Opt[string]
+	CreatedAt opt.Opt[string]
+}
+
+func buildAuthorUpdateSet(d dialect.Dialect, state *argState, data *AuthorUpdateData) (string, int) {
+	if data == nil {
+		return "", 0
+	}
+	var parts []string
+	if data.Id.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("id"), state.Add(data.Id.Value())))
+	}
+	if data.Name.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("name"), state.Add(data.Name.Value())))
+	}
+	if data.Email.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("email"), state.Add(data.Email.Value())))
+	}
+	if data.CreatedAt.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("created_at"), state.Add(data.CreatedAt.Value())))
+	}
+	return strings.Join(parts, ", "), len(parts)
+}
+
+type AuthorUpdate[U AuthorUnique] struct {
+	Where  U
+	Data   AuthorUpdateData
+	Select AuthorSelect
+}
+
+func UpdateOneAuthor[T AuthorModel, U AuthorUnique](ctx context.Context, db bom.Querier, q AuthorUpdate[U]) (*T, error) {
+	d := dialectpostgres.New()
+	state := newArgState(d)
+	setSQL, count := buildAuthorUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return nil, fmt.Errorf("AuthorUpdate requires at least one field to update")
+	}
+	alias := "t0"
+	whereClause, err := buildAuthorUniquePredicate(d, alias, state, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("author"), setSQL, whereClause)
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	updatedWhere, err := buildAuthorPostUpdateSelector(&q.Data, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	return FindUniqueAuthor[T, U](ctx, db, AuthorFindUnique[U]{
+		Where:  updatedWhere,
+		Select: q.Select,
+	})
+}
+
+func buildAuthorPostUpdateSelector[U AuthorUnique](data *AuthorUpdateData, where U) (U, error) {
+	switch v := any(where).(type) {
+	case AuthorUK_Id:
+		sel := v
+		if data != nil && data.Id.IsSome() {
+			sel.Id = data.Id.Value()
+		}
+		return any(sel).(U), nil
+	case AuthorUK_Email:
+		sel := v
+		if data != nil && data.Email.IsSome() {
+			sel.Email = data.Email.Value()
+		}
+		return any(sel).(U), nil
+	default:
+		return where, fmt.Errorf("unsupported unique type %T", where)
+	}
+}
+
+type AuthorUpdateMany struct {
+	Where *AuthorWhereInput
+	Data  AuthorUpdateData
+}
+
+func UpdateManyAuthor(ctx context.Context, db bom.Querier, q AuthorUpdateMany) (int64, error) {
+	d := dialectpostgres.New()
+	state := newArgState(d)
+	setSQL, count := buildAuthorUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return 0, fmt.Errorf("AuthorUpdateMany requires at least one field to update")
+	}
+	whereClause := buildAuthorWhere(d, "t0", state, q.Where)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return 0, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("author"), setSQL)
+	if whereClause != "" {
+		sqlStr += " WHERE " + whereClause
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+type AuthorProfileUpdateData struct {
+	Id        opt.Opt[int64]
+	AuthorId  opt.Opt[int64]
+	Bio       opt.Opt[string]
+	AvatarUrl opt.Opt[string]
+	CreatedAt opt.Opt[string]
+}
+
+func buildAuthorProfileUpdateSet(d dialect.Dialect, state *argState, data *AuthorProfileUpdateData) (string, int) {
+	if data == nil {
+		return "", 0
+	}
+	var parts []string
+	if data.Id.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("id"), state.Add(data.Id.Value())))
+	}
+	if data.AuthorId.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("author_id"), state.Add(data.AuthorId.Value())))
+	}
+	if data.Bio.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("bio"), state.Add(data.Bio.Value())))
+	}
+	if data.AvatarUrl.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("avatar_url"), state.Add(data.AvatarUrl.Value())))
+	}
+	if data.CreatedAt.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("created_at"), state.Add(data.CreatedAt.Value())))
+	}
+	return strings.Join(parts, ", "), len(parts)
+}
+
+type AuthorProfileUpdate[U AuthorProfileUnique] struct {
+	Where  U
+	Data   AuthorProfileUpdateData
+	Select AuthorProfileSelect
+}
+
+func UpdateOneAuthorProfile[T AuthorProfileModel, U AuthorProfileUnique](ctx context.Context, db bom.Querier, q AuthorProfileUpdate[U]) (*T, error) {
+	d := dialectpostgres.New()
+	state := newArgState(d)
+	setSQL, count := buildAuthorProfileUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return nil, fmt.Errorf("AuthorProfileUpdate requires at least one field to update")
+	}
+	alias := "t0"
+	whereClause, err := buildAuthorProfileUniquePredicate(d, alias, state, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("author_profile"), setSQL, whereClause)
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	updatedWhere, err := buildAuthorProfilePostUpdateSelector(&q.Data, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	return FindUniqueAuthorProfile[T, U](ctx, db, AuthorProfileFindUnique[U]{
+		Where:  updatedWhere,
+		Select: q.Select,
+	})
+}
+
+func buildAuthorProfilePostUpdateSelector[U AuthorProfileUnique](data *AuthorProfileUpdateData, where U) (U, error) {
+	switch v := any(where).(type) {
+	case AuthorProfileUK_Id:
+		sel := v
+		if data != nil && data.Id.IsSome() {
+			sel.Id = data.Id.Value()
+		}
+		return any(sel).(U), nil
+	case AuthorProfileUK_AuthorId:
+		sel := v
+		if data != nil && data.AuthorId.IsSome() {
+			sel.AuthorId = data.AuthorId.Value()
+		}
+		return any(sel).(U), nil
+	default:
+		return where, fmt.Errorf("unsupported unique type %T", where)
+	}
+}
+
+type AuthorProfileUpdateMany struct {
+	Where *AuthorProfileWhereInput
+	Data  AuthorProfileUpdateData
+}
+
+func UpdateManyAuthorProfile(ctx context.Context, db bom.Querier, q AuthorProfileUpdateMany) (int64, error) {
+	d := dialectpostgres.New()
+	state := newArgState(d)
+	setSQL, count := buildAuthorProfileUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return 0, fmt.Errorf("AuthorProfileUpdateMany requires at least one field to update")
+	}
+	whereClause := buildAuthorProfileWhere(d, "t0", state, q.Where)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return 0, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("author_profile"), setSQL)
+	if whereClause != "" {
+		sqlStr += " WHERE " + whereClause
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+type VideoUpdateData struct {
+	Id          opt.Opt[int64]
+	Title       opt.Opt[string]
+	Slug        opt.Opt[string]
+	AuthorId    opt.Opt[int64]
+	Description opt.Opt[string]
+	CreatedAt   opt.Opt[string]
+}
+
+func buildVideoUpdateSet(d dialect.Dialect, state *argState, data *VideoUpdateData) (string, int) {
+	if data == nil {
+		return "", 0
+	}
+	var parts []string
+	if data.Id.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("id"), state.Add(data.Id.Value())))
+	}
+	if data.Title.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("title"), state.Add(data.Title.Value())))
+	}
+	if data.Slug.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("slug"), state.Add(data.Slug.Value())))
+	}
+	if data.AuthorId.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("author_id"), state.Add(data.AuthorId.Value())))
+	}
+	if data.Description.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("description"), state.Add(data.Description.Value())))
+	}
+	if data.CreatedAt.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("created_at"), state.Add(data.CreatedAt.Value())))
+	}
+	return strings.Join(parts, ", "), len(parts)
+}
+
+type VideoUpdate[U VideoUnique] struct {
+	Where  U
+	Data   VideoUpdateData
+	Select VideoSelect
+}
+
+func UpdateOneVideo[T VideoModel, U VideoUnique](ctx context.Context, db bom.Querier, q VideoUpdate[U]) (*T, error) {
+	d := dialectpostgres.New()
+	state := newArgState(d)
+	setSQL, count := buildVideoUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return nil, fmt.Errorf("VideoUpdate requires at least one field to update")
+	}
+	alias := "t0"
+	whereClause, err := buildVideoUniquePredicate(d, alias, state, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("video"), setSQL, whereClause)
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	updatedWhere, err := buildVideoPostUpdateSelector(&q.Data, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	return FindUniqueVideo[T, U](ctx, db, VideoFindUnique[U]{
+		Where:  updatedWhere,
+		Select: q.Select,
+	})
+}
+
+func buildVideoPostUpdateSelector[U VideoUnique](data *VideoUpdateData, where U) (U, error) {
+	switch v := any(where).(type) {
+	case VideoUK_Id:
+		sel := v
+		if data != nil && data.Id.IsSome() {
+			sel.Id = data.Id.Value()
+		}
+		return any(sel).(U), nil
+	case VideoUK_Slug:
+		sel := v
+		if data != nil && data.Slug.IsSome() {
+			sel.Slug = data.Slug.Value()
+		}
+		return any(sel).(U), nil
+	default:
+		return where, fmt.Errorf("unsupported unique type %T", where)
+	}
+}
+
+type VideoUpdateMany struct {
+	Where *VideoWhereInput
+	Data  VideoUpdateData
+}
+
+func UpdateManyVideo(ctx context.Context, db bom.Querier, q VideoUpdateMany) (int64, error) {
+	d := dialectpostgres.New()
+	state := newArgState(d)
+	setSQL, count := buildVideoUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return 0, fmt.Errorf("VideoUpdateMany requires at least one field to update")
+	}
+	whereClause := buildVideoWhere(d, "t0", state, q.Where)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return 0, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("video"), setSQL)
+	if whereClause != "" {
+		sqlStr += " WHERE " + whereClause
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+type CommentUpdateData struct {
+	Id        opt.Opt[int64]
+	VideoId   opt.Opt[int64]
+	AuthorId  opt.Opt[int64]
+	Body      opt.Opt[string]
+	CreatedAt opt.Opt[string]
+}
+
+func buildCommentUpdateSet(d dialect.Dialect, state *argState, data *CommentUpdateData) (string, int) {
+	if data == nil {
+		return "", 0
+	}
+	var parts []string
+	if data.Id.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("id"), state.Add(data.Id.Value())))
+	}
+	if data.VideoId.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("video_id"), state.Add(data.VideoId.Value())))
+	}
+	if data.AuthorId.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("author_id"), state.Add(data.AuthorId.Value())))
+	}
+	if data.Body.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("body"), state.Add(data.Body.Value())))
+	}
+	if data.CreatedAt.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("created_at"), state.Add(data.CreatedAt.Value())))
+	}
+	return strings.Join(parts, ", "), len(parts)
+}
+
+type CommentUpdate[U CommentUnique] struct {
+	Where  U
+	Data   CommentUpdateData
+	Select CommentSelect
+}
+
+func UpdateOneComment[T CommentModel, U CommentUnique](ctx context.Context, db bom.Querier, q CommentUpdate[U]) (*T, error) {
+	d := dialectpostgres.New()
+	state := newArgState(d)
+	setSQL, count := buildCommentUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return nil, fmt.Errorf("CommentUpdate requires at least one field to update")
+	}
+	alias := "t0"
+	whereClause, err := buildCommentUniquePredicate(d, alias, state, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("comment"), setSQL, whereClause)
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	updatedWhere, err := buildCommentPostUpdateSelector(&q.Data, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	return FindUniqueComment[T, U](ctx, db, CommentFindUnique[U]{
+		Where:  updatedWhere,
+		Select: q.Select,
+	})
+}
+
+func buildCommentPostUpdateSelector[U CommentUnique](data *CommentUpdateData, where U) (U, error) {
+	switch v := any(where).(type) {
+	case CommentUK_Id:
+		sel := v
+		if data != nil && data.Id.IsSome() {
+			sel.Id = data.Id.Value()
+		}
+		return any(sel).(U), nil
+	default:
+		return where, fmt.Errorf("unsupported unique type %T", where)
+	}
+}
+
+type CommentUpdateMany struct {
+	Where *CommentWhereInput
+	Data  CommentUpdateData
+}
+
+func UpdateManyComment(ctx context.Context, db bom.Querier, q CommentUpdateMany) (int64, error) {
+	d := dialectpostgres.New()
+	state := newArgState(d)
+	setSQL, count := buildCommentUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return 0, fmt.Errorf("CommentUpdateMany requires at least one field to update")
+	}
+	whereClause := buildCommentWhere(d, "t0", state, q.Where)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return 0, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("comment"), setSQL)
+	if whereClause != "" {
+		sqlStr += " WHERE " + whereClause
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+type TagUpdateData struct {
+	Id   opt.Opt[int64]
+	Name opt.Opt[string]
+}
+
+func buildTagUpdateSet(d dialect.Dialect, state *argState, data *TagUpdateData) (string, int) {
+	if data == nil {
+		return "", 0
+	}
+	var parts []string
+	if data.Id.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("id"), state.Add(data.Id.Value())))
+	}
+	if data.Name.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("name"), state.Add(data.Name.Value())))
+	}
+	return strings.Join(parts, ", "), len(parts)
+}
+
+type TagUpdate[U TagUnique] struct {
+	Where  U
+	Data   TagUpdateData
+	Select TagSelect
+}
+
+func UpdateOneTag[T TagModel, U TagUnique](ctx context.Context, db bom.Querier, q TagUpdate[U]) (*T, error) {
+	d := dialectpostgres.New()
+	state := newArgState(d)
+	setSQL, count := buildTagUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return nil, fmt.Errorf("TagUpdate requires at least one field to update")
+	}
+	alias := "t0"
+	whereClause, err := buildTagUniquePredicate(d, alias, state, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("tag"), setSQL, whereClause)
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	updatedWhere, err := buildTagPostUpdateSelector(&q.Data, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	return FindUniqueTag[T, U](ctx, db, TagFindUnique[U]{
+		Where:  updatedWhere,
+		Select: q.Select,
+	})
+}
+
+func buildTagPostUpdateSelector[U TagUnique](data *TagUpdateData, where U) (U, error) {
+	switch v := any(where).(type) {
+	case TagUK_Id:
+		sel := v
+		if data != nil && data.Id.IsSome() {
+			sel.Id = data.Id.Value()
+		}
+		return any(sel).(U), nil
+	case TagUK_Name:
+		sel := v
+		if data != nil && data.Name.IsSome() {
+			sel.Name = data.Name.Value()
+		}
+		return any(sel).(U), nil
+	default:
+		return where, fmt.Errorf("unsupported unique type %T", where)
+	}
+}
+
+type TagUpdateMany struct {
+	Where *TagWhereInput
+	Data  TagUpdateData
+}
+
+func UpdateManyTag(ctx context.Context, db bom.Querier, q TagUpdateMany) (int64, error) {
+	d := dialectpostgres.New()
+	state := newArgState(d)
+	setSQL, count := buildTagUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return 0, fmt.Errorf("TagUpdateMany requires at least one field to update")
+	}
+	whereClause := buildTagWhere(d, "t0", state, q.Where)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return 0, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("tag"), setSQL)
+	if whereClause != "" {
+		sqlStr += " WHERE " + whereClause
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+type VideoTagUpdateData struct {
+	VideoId opt.Opt[int64]
+	TagId   opt.Opt[int64]
+}
+
+func buildVideoTagUpdateSet(d dialect.Dialect, state *argState, data *VideoTagUpdateData) (string, int) {
+	if data == nil {
+		return "", 0
+	}
+	var parts []string
+	if data.VideoId.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("video_id"), state.Add(data.VideoId.Value())))
+	}
+	if data.TagId.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("tag_id"), state.Add(data.TagId.Value())))
+	}
+	return strings.Join(parts, ", "), len(parts)
+}
+
+type VideoTagUpdate[U VideoTagUnique] struct {
+	Where  U
+	Data   VideoTagUpdateData
+	Select VideoTagSelect
+}
+
+func UpdateOneVideoTag[T VideoTagModel, U VideoTagUnique](ctx context.Context, db bom.Querier, q VideoTagUpdate[U]) (*T, error) {
+	d := dialectpostgres.New()
+	state := newArgState(d)
+	setSQL, count := buildVideoTagUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return nil, fmt.Errorf("VideoTagUpdate requires at least one field to update")
+	}
+	alias := "t0"
+	whereClause, err := buildVideoTagUniquePredicate(d, alias, state, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("video_tag"), setSQL, whereClause)
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	updatedWhere, err := buildVideoTagPostUpdateSelector(&q.Data, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	return FindUniqueVideoTag[T, U](ctx, db, VideoTagFindUnique[U]{
+		Where:  updatedWhere,
+		Select: q.Select,
+	})
+}
+
+func buildVideoTagPostUpdateSelector[U VideoTagUnique](data *VideoTagUpdateData, where U) (U, error) {
+	switch v := any(where).(type) {
+	case VideoTagUK_VideoIdTagId:
+		sel := v
+		if data != nil && data.VideoId.IsSome() {
+			sel.VideoId = data.VideoId.Value()
+		}
+		if data != nil && data.TagId.IsSome() {
+			sel.TagId = data.TagId.Value()
+		}
+		return any(sel).(U), nil
+	default:
+		return where, fmt.Errorf("unsupported unique type %T", where)
+	}
+}
+
+type VideoTagUpdateMany struct {
+	Where *VideoTagWhereInput
+	Data  VideoTagUpdateData
+}
+
+func UpdateManyVideoTag(ctx context.Context, db bom.Querier, q VideoTagUpdateMany) (int64, error) {
+	d := dialectpostgres.New()
+	state := newArgState(d)
+	setSQL, count := buildVideoTagUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return 0, fmt.Errorf("VideoTagUpdateMany requires at least one field to update")
+	}
+	whereClause := buildVideoTagWhere(d, "t0", state, q.Where)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return 0, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("video_tag"), setSQL)
+	if whereClause != "" {
+		sqlStr += " WHERE " + whereClause
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
