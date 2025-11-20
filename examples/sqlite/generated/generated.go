@@ -316,24 +316,6 @@ type AuthorFindFirst struct {
 	Skip    opt.Opt[int]
 	Select  AuthorSelect
 }
-type AuthorCreateData struct {
-	Id            opt.Opt[uint64]
-	Name          opt.Opt[string]
-	Email         opt.Opt[string]
-	CreatedAt     opt.Opt[string]
-	AuthorProfile *AuthorProfileCreateData
-	Comment       []CommentCreateData
-	Video         []VideoCreateData
-}
-
-type AuthorCreate struct {
-	Data   AuthorCreateData
-	Select AuthorSelect
-}
-
-type AuthorCreateMany struct {
-	Data []AuthorCreateData
-}
 
 func buildAuthorWhere(d dialect.Dialect, alias string, args *argState, where *AuthorWhereInput) string {
 	if where == nil {
@@ -906,265 +888,6 @@ func FindFirstAuthor[T AuthorModel](ctx context.Context, db bom.Querier, q Autho
 	out := rows[0]
 	return &out, nil
 }
-func CreateOneAuthor[T AuthorModel](ctx context.Context, db bom.Querier, q AuthorCreate) (*T, error) {
-	d := dialectsqlite.New()
-	data := q.Data
-	if err := createAuthorRecord(ctx, db, d, &data); err != nil {
-		return nil, err
-	}
-	if err := createAuthorRelations(ctx, db, d, &data); err != nil {
-		return nil, err
-	}
-	var fetch func(context.Context, AuthorSelect) (*T, error)
-	if fetch == nil {
-		if data.Id.IsSome() {
-			lookup := AuthorUK_Id{
-				Id: data.Id.Value(),
-			}
-			fetch = func(ctx context.Context, sel AuthorSelect) (*T, error) {
-				return FindUniqueAuthor[T](ctx, db, AuthorFindUnique[AuthorUK_Id]{
-					Where:  lookup,
-					Select: sel,
-				})
-			}
-		}
-	}
-	if fetch == nil {
-		if data.Email.IsSome() {
-			lookup := AuthorUK_Email{
-				Email: data.Email.Value(),
-			}
-			fetch = func(ctx context.Context, sel AuthorSelect) (*T, error) {
-				return FindUniqueAuthor[T](ctx, db, AuthorFindUnique[AuthorUK_Email]{
-					Where:  lookup,
-					Select: sel,
-				})
-			}
-		}
-	}
-	if fetch == nil {
-		return nil, fmt.Errorf("AuthorCreate requires values for a unique constraint")
-	}
-	return fetch(ctx, q.Select)
-}
-
-func CreateManyAuthor(ctx context.Context, db bom.Querier, q AuthorCreateMany) (int64, error) {
-	d := dialectsqlite.New()
-	if len(q.Data) == 0 {
-		return 0, nil
-	}
-	var total int64
-	for i := range q.Data {
-		data := q.Data[i]
-		if err := createAuthorRecord(ctx, db, d, &data); err != nil {
-			return total, err
-		}
-		if err := createAuthorRelations(ctx, db, d, &data); err != nil {
-			return total, err
-		}
-		total++
-	}
-	return total, nil
-}
-
-func createAuthorRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, data *AuthorCreateData) error {
-	state := newArgState(d)
-	var columns []string
-	var placeholders []string
-	if identityGenerator == nil {
-		identityGenerator = &bom.DefaultIdentityGenerator{}
-	}
-	var wantsAutoId bool
-	var wantsAutoName bool
-	var wantsAutoEmail bool
-	var wantsAutoCreatedAt bool
-	if data.Id.IsSome() {
-		val := data.Id.Value()
-		columns = append(columns, d.QuoteIdent("id"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-		wantsAutoId = true
-	}
-	if data.Name.IsSome() {
-		val := data.Name.Value()
-		columns = append(columns, d.QuoteIdent("name"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-	}
-	if data.Email.IsSome() {
-		val := data.Email.Value()
-		columns = append(columns, d.QuoteIdent("email"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-	}
-	if data.CreatedAt.IsSome() {
-		val := data.CreatedAt.Value()
-		columns = append(columns, d.QuoteIdent("created_at"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-	}
-	if err := ensureParamLimit(d, len(state.Args())); err != nil {
-		return err
-	}
-	sqlStr := buildInsertSQL(d, "author", columns, placeholders)
-	autoCount := 0
-	if wantsAutoId {
-		autoCount++
-	}
-	if wantsAutoName {
-		autoCount++
-	}
-	if wantsAutoEmail {
-		autoCount++
-	}
-	if wantsAutoCreatedAt {
-		autoCount++
-	}
-	var returning bool
-	if d.Cap().InsertReturning && autoCount > 0 {
-		returning = true
-		var returningCols []string
-		if wantsAutoId {
-			returningCols = append(returningCols, d.QuoteIdent("id"))
-		}
-		if wantsAutoName {
-			returningCols = append(returningCols, d.QuoteIdent("name"))
-		}
-		if wantsAutoEmail {
-			returningCols = append(returningCols, d.QuoteIdent("email"))
-		}
-		if wantsAutoCreatedAt {
-			returningCols = append(returningCols, d.QuoteIdent("created_at"))
-		}
-		if len(returningCols) > 0 {
-			sqlStr = sqlStr + " RETURNING " + strings.Join(returningCols, ", ")
-		}
-	}
-	if returning {
-		rows, err := db.QueryContext(ctx, sqlStr, state.Args()...)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		var scanTargets []any
-		var retId uint64
-		if wantsAutoId {
-			scanTargets = append(scanTargets, &retId)
-		}
-		var retName string
-		if wantsAutoName {
-			scanTargets = append(scanTargets, &retName)
-		}
-		var retEmail string
-		if wantsAutoEmail {
-			scanTargets = append(scanTargets, &retEmail)
-		}
-		var retCreatedAt string
-		if wantsAutoCreatedAt {
-			scanTargets = append(scanTargets, &retCreatedAt)
-		}
-		if !rows.Next() {
-			if err := rows.Err(); err != nil {
-				return err
-			}
-			return fmt.Errorf("Author insert returned no rows")
-		}
-		if err := rows.Scan(scanTargets...); err != nil {
-			return err
-		}
-		if wantsAutoId {
-			data.Id = opt.OVal(retId)
-		}
-		if wantsAutoName {
-			data.Name = opt.OVal(retName)
-		}
-		if wantsAutoEmail {
-			data.Email = opt.OVal(retEmail)
-		}
-		if wantsAutoCreatedAt {
-			data.CreatedAt = opt.OVal(retCreatedAt)
-		}
-		return nil
-	}
-	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
-	if err != nil {
-		return err
-	}
-	if autoCount == 1 {
-		id, err := res.LastInsertId()
-		if err != nil {
-			return err
-		}
-		if wantsAutoId {
-			data.Id = opt.OVal(uint64(id))
-		}
-		if wantsAutoName {
-			data.Name = opt.OVal(strconv.FormatInt(id, 10))
-		}
-		if wantsAutoEmail {
-			data.Email = opt.OVal(strconv.FormatInt(id, 10))
-		}
-		if wantsAutoCreatedAt {
-			data.CreatedAt = opt.OVal(strconv.FormatInt(id, 10))
-		}
-	} else if autoCount > 1 {
-		return fmt.Errorf("%s cannot populate multiple auto columns for author without RETURNING", d.Name())
-	}
-	return nil
-}
-
-func createAuthorRelations(ctx context.Context, db bom.Querier, d dialect.Dialect, data *AuthorCreateData) error {
-	if data.AuthorProfile != nil {
-		child := data.AuthorProfile
-		if !child.AuthorId.IsSome() {
-			if !data.Id.IsSome() {
-				return fmt.Errorf("Author: missing id for relation AuthorProfile")
-			}
-			child.AuthorId = data.Id
-		}
-		if err := createAuthorProfileRecord(ctx, db, d, child); err != nil {
-			return err
-		}
-		if err := createAuthorProfileRelations(ctx, db, d, child); err != nil {
-			return err
-		}
-	}
-	if len(data.Comment) > 0 {
-		for i := range data.Comment {
-			child := &data.Comment[i]
-			if !child.AuthorId.IsSome() {
-				if !data.Id.IsSome() {
-					return fmt.Errorf("Author: missing id for relation Comment")
-				}
-				child.AuthorId = data.Id
-			}
-			if err := createCommentRecord(ctx, db, d, child); err != nil {
-				return err
-			}
-			if err := createCommentRelations(ctx, db, d, child); err != nil {
-				return err
-			}
-		}
-	}
-	if len(data.Video) > 0 {
-		for i := range data.Video {
-			child := &data.Video[i]
-			if !child.AuthorId.IsSome() {
-				if !data.Id.IsSome() {
-					return fmt.Errorf("Author: missing id for relation Video")
-				}
-				child.AuthorId = data.Id
-			}
-			if err := createVideoRecord(ctx, db, d, child); err != nil {
-				return err
-			}
-			if err := createVideoRelations(ctx, db, d, child); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
 
 func queryAuthorRows[T AuthorModel](ctx context.Context, db bom.Querier, d dialect.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
 	sqlStr, args, err := planner.BuildFindMany(d, input)
@@ -1327,22 +1050,6 @@ type AuthorProfileFindFirst struct {
 	OrderBy []AuthorProfileOrderByInput
 	Skip    opt.Opt[int]
 	Select  AuthorProfileSelect
-}
-type AuthorProfileCreateData struct {
-	Id        opt.Opt[uint64]
-	AuthorId  opt.Opt[uint64]
-	Bio       opt.Opt[string]
-	AvatarUrl opt.Opt[string]
-	CreatedAt opt.Opt[string]
-}
-
-type AuthorProfileCreate struct {
-	Data   AuthorProfileCreateData
-	Select AuthorProfileSelect
-}
-
-type AuthorProfileCreateMany struct {
-	Data []AuthorProfileCreateData
 }
 
 func buildAuthorProfileWhere(d dialect.Dialect, alias string, args *argState, where *AuthorProfileWhereInput) string {
@@ -1634,239 +1341,6 @@ func FindFirstAuthorProfile[T AuthorProfileModel](ctx context.Context, db bom.Qu
 	out := rows[0]
 	return &out, nil
 }
-func CreateOneAuthorProfile[T AuthorProfileModel](ctx context.Context, db bom.Querier, q AuthorProfileCreate) (*T, error) {
-	d := dialectsqlite.New()
-	data := q.Data
-	if err := createAuthorProfileRecord(ctx, db, d, &data); err != nil {
-		return nil, err
-	}
-	if err := createAuthorProfileRelations(ctx, db, d, &data); err != nil {
-		return nil, err
-	}
-	var fetch func(context.Context, AuthorProfileSelect) (*T, error)
-	if fetch == nil {
-		if data.Id.IsSome() {
-			lookup := AuthorProfileUK_Id{
-				Id: data.Id.Value(),
-			}
-			fetch = func(ctx context.Context, sel AuthorProfileSelect) (*T, error) {
-				return FindUniqueAuthorProfile[T](ctx, db, AuthorProfileFindUnique[AuthorProfileUK_Id]{
-					Where:  lookup,
-					Select: sel,
-				})
-			}
-		}
-	}
-	if fetch == nil {
-		if data.AuthorId.IsSome() {
-			lookup := AuthorProfileUK_AuthorId{
-				AuthorId: data.AuthorId.Value(),
-			}
-			fetch = func(ctx context.Context, sel AuthorProfileSelect) (*T, error) {
-				return FindUniqueAuthorProfile[T](ctx, db, AuthorProfileFindUnique[AuthorProfileUK_AuthorId]{
-					Where:  lookup,
-					Select: sel,
-				})
-			}
-		}
-	}
-	if fetch == nil {
-		return nil, fmt.Errorf("AuthorProfileCreate requires values for a unique constraint")
-	}
-	return fetch(ctx, q.Select)
-}
-
-func CreateManyAuthorProfile(ctx context.Context, db bom.Querier, q AuthorProfileCreateMany) (int64, error) {
-	d := dialectsqlite.New()
-	if len(q.Data) == 0 {
-		return 0, nil
-	}
-	var total int64
-	for i := range q.Data {
-		data := q.Data[i]
-		if err := createAuthorProfileRecord(ctx, db, d, &data); err != nil {
-			return total, err
-		}
-		if err := createAuthorProfileRelations(ctx, db, d, &data); err != nil {
-			return total, err
-		}
-		total++
-	}
-	return total, nil
-}
-
-func createAuthorProfileRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, data *AuthorProfileCreateData) error {
-	state := newArgState(d)
-	var columns []string
-	var placeholders []string
-	if identityGenerator == nil {
-		identityGenerator = &bom.DefaultIdentityGenerator{}
-	}
-	var wantsAutoId bool
-	var wantsAutoAuthorId bool
-	var wantsAutoBio bool
-	var wantsAutoAvatarUrl bool
-	var wantsAutoCreatedAt bool
-	if data.Id.IsSome() {
-		val := data.Id.Value()
-		columns = append(columns, d.QuoteIdent("id"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-		wantsAutoId = true
-	}
-	if data.AuthorId.IsSome() {
-		val := data.AuthorId.Value()
-		columns = append(columns, d.QuoteIdent("author_id"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-	}
-	if data.Bio.IsSome() {
-		val := data.Bio.Value()
-		columns = append(columns, d.QuoteIdent("bio"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-	}
-	if data.AvatarUrl.IsSome() {
-		val := data.AvatarUrl.Value()
-		columns = append(columns, d.QuoteIdent("avatar_url"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-	}
-	if data.CreatedAt.IsSome() {
-		val := data.CreatedAt.Value()
-		columns = append(columns, d.QuoteIdent("created_at"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-	}
-	if err := ensureParamLimit(d, len(state.Args())); err != nil {
-		return err
-	}
-	sqlStr := buildInsertSQL(d, "author_profile", columns, placeholders)
-	autoCount := 0
-	if wantsAutoId {
-		autoCount++
-	}
-	if wantsAutoAuthorId {
-		autoCount++
-	}
-	if wantsAutoBio {
-		autoCount++
-	}
-	if wantsAutoAvatarUrl {
-		autoCount++
-	}
-	if wantsAutoCreatedAt {
-		autoCount++
-	}
-	var returning bool
-	if d.Cap().InsertReturning && autoCount > 0 {
-		returning = true
-		var returningCols []string
-		if wantsAutoId {
-			returningCols = append(returningCols, d.QuoteIdent("id"))
-		}
-		if wantsAutoAuthorId {
-			returningCols = append(returningCols, d.QuoteIdent("author_id"))
-		}
-		if wantsAutoBio {
-			returningCols = append(returningCols, d.QuoteIdent("bio"))
-		}
-		if wantsAutoAvatarUrl {
-			returningCols = append(returningCols, d.QuoteIdent("avatar_url"))
-		}
-		if wantsAutoCreatedAt {
-			returningCols = append(returningCols, d.QuoteIdent("created_at"))
-		}
-		if len(returningCols) > 0 {
-			sqlStr = sqlStr + " RETURNING " + strings.Join(returningCols, ", ")
-		}
-	}
-	if returning {
-		rows, err := db.QueryContext(ctx, sqlStr, state.Args()...)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		var scanTargets []any
-		var retId uint64
-		if wantsAutoId {
-			scanTargets = append(scanTargets, &retId)
-		}
-		var retAuthorId uint64
-		if wantsAutoAuthorId {
-			scanTargets = append(scanTargets, &retAuthorId)
-		}
-		var retBio string
-		if wantsAutoBio {
-			scanTargets = append(scanTargets, &retBio)
-		}
-		var retAvatarUrl string
-		if wantsAutoAvatarUrl {
-			scanTargets = append(scanTargets, &retAvatarUrl)
-		}
-		var retCreatedAt string
-		if wantsAutoCreatedAt {
-			scanTargets = append(scanTargets, &retCreatedAt)
-		}
-		if !rows.Next() {
-			if err := rows.Err(); err != nil {
-				return err
-			}
-			return fmt.Errorf("AuthorProfile insert returned no rows")
-		}
-		if err := rows.Scan(scanTargets...); err != nil {
-			return err
-		}
-		if wantsAutoId {
-			data.Id = opt.OVal(retId)
-		}
-		if wantsAutoAuthorId {
-			data.AuthorId = opt.OVal(retAuthorId)
-		}
-		if wantsAutoBio {
-			data.Bio = opt.OVal(retBio)
-		}
-		if wantsAutoAvatarUrl {
-			data.AvatarUrl = opt.OVal(retAvatarUrl)
-		}
-		if wantsAutoCreatedAt {
-			data.CreatedAt = opt.OVal(retCreatedAt)
-		}
-		return nil
-	}
-	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
-	if err != nil {
-		return err
-	}
-	if autoCount == 1 {
-		id, err := res.LastInsertId()
-		if err != nil {
-			return err
-		}
-		if wantsAutoId {
-			data.Id = opt.OVal(uint64(id))
-		}
-		if wantsAutoAuthorId {
-			data.AuthorId = opt.OVal(uint64(id))
-		}
-		if wantsAutoBio {
-			data.Bio = opt.OVal(strconv.FormatInt(id, 10))
-		}
-		if wantsAutoAvatarUrl {
-			data.AvatarUrl = opt.OVal(strconv.FormatInt(id, 10))
-		}
-		if wantsAutoCreatedAt {
-			data.CreatedAt = opt.OVal(strconv.FormatInt(id, 10))
-		}
-	} else if autoCount > 1 {
-		return fmt.Errorf("%s cannot populate multiple auto columns for author_profile without RETURNING", d.Name())
-	}
-	return nil
-}
-
-func createAuthorProfileRelations(ctx context.Context, db bom.Querier, d dialect.Dialect, data *AuthorProfileCreateData) error {
-	return nil
-}
 
 func queryAuthorProfileRows[T AuthorProfileModel](ctx context.Context, db bom.Querier, d dialect.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
 	sqlStr, args, err := planner.BuildFindMany(d, input)
@@ -2077,25 +1551,6 @@ type VideoFindFirst struct {
 	OrderBy []VideoOrderByInput
 	Skip    opt.Opt[int]
 	Select  VideoSelect
-}
-type VideoCreateData struct {
-	Id          opt.Opt[uint64]
-	Title       opt.Opt[string]
-	Slug        opt.Opt[string]
-	AuthorId    opt.Opt[uint64]
-	Description opt.Opt[string]
-	CreatedAt   opt.Opt[string]
-	Comment     []CommentCreateData
-	VideoTag    []VideoTagCreateData
-}
-
-type VideoCreate struct {
-	Data   VideoCreateData
-	Select VideoSelect
-}
-
-type VideoCreateMany struct {
-	Data []VideoCreateData
 }
 
 func buildVideoWhere(d dialect.Dialect, alias string, args *argState, where *VideoWhereInput) string {
@@ -2677,299 +2132,6 @@ func FindFirstVideo[T VideoModel](ctx context.Context, db bom.Querier, q VideoFi
 	out := rows[0]
 	return &out, nil
 }
-func CreateOneVideo[T VideoModel](ctx context.Context, db bom.Querier, q VideoCreate) (*T, error) {
-	d := dialectsqlite.New()
-	data := q.Data
-	if err := createVideoRecord(ctx, db, d, &data); err != nil {
-		return nil, err
-	}
-	if err := createVideoRelations(ctx, db, d, &data); err != nil {
-		return nil, err
-	}
-	var fetch func(context.Context, VideoSelect) (*T, error)
-	if fetch == nil {
-		if data.Id.IsSome() {
-			lookup := VideoUK_Id{
-				Id: data.Id.Value(),
-			}
-			fetch = func(ctx context.Context, sel VideoSelect) (*T, error) {
-				return FindUniqueVideo[T](ctx, db, VideoFindUnique[VideoUK_Id]{
-					Where:  lookup,
-					Select: sel,
-				})
-			}
-		}
-	}
-	if fetch == nil {
-		if data.Slug.IsSome() {
-			lookup := VideoUK_Slug{
-				Slug: data.Slug.Value(),
-			}
-			fetch = func(ctx context.Context, sel VideoSelect) (*T, error) {
-				return FindUniqueVideo[T](ctx, db, VideoFindUnique[VideoUK_Slug]{
-					Where:  lookup,
-					Select: sel,
-				})
-			}
-		}
-	}
-	if fetch == nil {
-		return nil, fmt.Errorf("VideoCreate requires values for a unique constraint")
-	}
-	return fetch(ctx, q.Select)
-}
-
-func CreateManyVideo(ctx context.Context, db bom.Querier, q VideoCreateMany) (int64, error) {
-	d := dialectsqlite.New()
-	if len(q.Data) == 0 {
-		return 0, nil
-	}
-	var total int64
-	for i := range q.Data {
-		data := q.Data[i]
-		if err := createVideoRecord(ctx, db, d, &data); err != nil {
-			return total, err
-		}
-		if err := createVideoRelations(ctx, db, d, &data); err != nil {
-			return total, err
-		}
-		total++
-	}
-	return total, nil
-}
-
-func createVideoRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, data *VideoCreateData) error {
-	state := newArgState(d)
-	var columns []string
-	var placeholders []string
-	if identityGenerator == nil {
-		identityGenerator = &bom.DefaultIdentityGenerator{}
-	}
-	var wantsAutoId bool
-	var wantsAutoTitle bool
-	var wantsAutoSlug bool
-	var wantsAutoAuthorId bool
-	var wantsAutoDescription bool
-	var wantsAutoCreatedAt bool
-	if data.Id.IsSome() {
-		val := data.Id.Value()
-		columns = append(columns, d.QuoteIdent("id"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-		wantsAutoId = true
-	}
-	if data.Title.IsSome() {
-		val := data.Title.Value()
-		columns = append(columns, d.QuoteIdent("title"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-	}
-	if data.Slug.IsSome() {
-		val := data.Slug.Value()
-		columns = append(columns, d.QuoteIdent("slug"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-	}
-	if data.AuthorId.IsSome() {
-		val := data.AuthorId.Value()
-		columns = append(columns, d.QuoteIdent("author_id"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-	}
-	if data.Description.IsSome() {
-		val := data.Description.Value()
-		columns = append(columns, d.QuoteIdent("description"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-	}
-	if data.CreatedAt.IsSome() {
-		val := data.CreatedAt.Value()
-		columns = append(columns, d.QuoteIdent("created_at"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-	}
-	if err := ensureParamLimit(d, len(state.Args())); err != nil {
-		return err
-	}
-	sqlStr := buildInsertSQL(d, "video", columns, placeholders)
-	autoCount := 0
-	if wantsAutoId {
-		autoCount++
-	}
-	if wantsAutoTitle {
-		autoCount++
-	}
-	if wantsAutoSlug {
-		autoCount++
-	}
-	if wantsAutoAuthorId {
-		autoCount++
-	}
-	if wantsAutoDescription {
-		autoCount++
-	}
-	if wantsAutoCreatedAt {
-		autoCount++
-	}
-	var returning bool
-	if d.Cap().InsertReturning && autoCount > 0 {
-		returning = true
-		var returningCols []string
-		if wantsAutoId {
-			returningCols = append(returningCols, d.QuoteIdent("id"))
-		}
-		if wantsAutoTitle {
-			returningCols = append(returningCols, d.QuoteIdent("title"))
-		}
-		if wantsAutoSlug {
-			returningCols = append(returningCols, d.QuoteIdent("slug"))
-		}
-		if wantsAutoAuthorId {
-			returningCols = append(returningCols, d.QuoteIdent("author_id"))
-		}
-		if wantsAutoDescription {
-			returningCols = append(returningCols, d.QuoteIdent("description"))
-		}
-		if wantsAutoCreatedAt {
-			returningCols = append(returningCols, d.QuoteIdent("created_at"))
-		}
-		if len(returningCols) > 0 {
-			sqlStr = sqlStr + " RETURNING " + strings.Join(returningCols, ", ")
-		}
-	}
-	if returning {
-		rows, err := db.QueryContext(ctx, sqlStr, state.Args()...)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		var scanTargets []any
-		var retId uint64
-		if wantsAutoId {
-			scanTargets = append(scanTargets, &retId)
-		}
-		var retTitle string
-		if wantsAutoTitle {
-			scanTargets = append(scanTargets, &retTitle)
-		}
-		var retSlug string
-		if wantsAutoSlug {
-			scanTargets = append(scanTargets, &retSlug)
-		}
-		var retAuthorId uint64
-		if wantsAutoAuthorId {
-			scanTargets = append(scanTargets, &retAuthorId)
-		}
-		var retDescription string
-		if wantsAutoDescription {
-			scanTargets = append(scanTargets, &retDescription)
-		}
-		var retCreatedAt string
-		if wantsAutoCreatedAt {
-			scanTargets = append(scanTargets, &retCreatedAt)
-		}
-		if !rows.Next() {
-			if err := rows.Err(); err != nil {
-				return err
-			}
-			return fmt.Errorf("Video insert returned no rows")
-		}
-		if err := rows.Scan(scanTargets...); err != nil {
-			return err
-		}
-		if wantsAutoId {
-			data.Id = opt.OVal(retId)
-		}
-		if wantsAutoTitle {
-			data.Title = opt.OVal(retTitle)
-		}
-		if wantsAutoSlug {
-			data.Slug = opt.OVal(retSlug)
-		}
-		if wantsAutoAuthorId {
-			data.AuthorId = opt.OVal(retAuthorId)
-		}
-		if wantsAutoDescription {
-			data.Description = opt.OVal(retDescription)
-		}
-		if wantsAutoCreatedAt {
-			data.CreatedAt = opt.OVal(retCreatedAt)
-		}
-		return nil
-	}
-	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
-	if err != nil {
-		return err
-	}
-	if autoCount == 1 {
-		id, err := res.LastInsertId()
-		if err != nil {
-			return err
-		}
-		if wantsAutoId {
-			data.Id = opt.OVal(uint64(id))
-		}
-		if wantsAutoTitle {
-			data.Title = opt.OVal(strconv.FormatInt(id, 10))
-		}
-		if wantsAutoSlug {
-			data.Slug = opt.OVal(strconv.FormatInt(id, 10))
-		}
-		if wantsAutoAuthorId {
-			data.AuthorId = opt.OVal(uint64(id))
-		}
-		if wantsAutoDescription {
-			data.Description = opt.OVal(strconv.FormatInt(id, 10))
-		}
-		if wantsAutoCreatedAt {
-			data.CreatedAt = opt.OVal(strconv.FormatInt(id, 10))
-		}
-	} else if autoCount > 1 {
-		return fmt.Errorf("%s cannot populate multiple auto columns for video without RETURNING", d.Name())
-	}
-	return nil
-}
-
-func createVideoRelations(ctx context.Context, db bom.Querier, d dialect.Dialect, data *VideoCreateData) error {
-	if len(data.Comment) > 0 {
-		for i := range data.Comment {
-			child := &data.Comment[i]
-			if !child.VideoId.IsSome() {
-				if !data.Id.IsSome() {
-					return fmt.Errorf("Video: missing id for relation Comment")
-				}
-				child.VideoId = data.Id
-			}
-			if !child.AuthorId.IsSome() && data.AuthorId.IsSome() {
-				child.AuthorId = data.AuthorId
-			}
-			if err := createCommentRecord(ctx, db, d, child); err != nil {
-				return err
-			}
-			if err := createCommentRelations(ctx, db, d, child); err != nil {
-				return err
-			}
-		}
-	}
-	if len(data.VideoTag) > 0 {
-		for i := range data.VideoTag {
-			child := &data.VideoTag[i]
-			if !child.VideoId.IsSome() {
-				if !data.Id.IsSome() {
-					return fmt.Errorf("Video: missing id for relation VideoTag")
-				}
-				child.VideoId = data.Id
-			}
-			if err := createVideoTagRecord(ctx, db, d, child); err != nil {
-				return err
-			}
-			if err := createVideoTagRelations(ctx, db, d, child); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
 
 func queryVideoRows[T VideoModel](ctx context.Context, db bom.Querier, d dialect.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
 	sqlStr, args, err := planner.BuildFindMany(d, input)
@@ -3149,22 +2311,6 @@ type CommentFindFirst struct {
 	OrderBy []CommentOrderByInput
 	Skip    opt.Opt[int]
 	Select  CommentSelect
-}
-type CommentCreateData struct {
-	Id        opt.Opt[uint64]
-	VideoId   opt.Opt[uint64]
-	AuthorId  opt.Opt[uint64]
-	Body      opt.Opt[string]
-	CreatedAt opt.Opt[string]
-}
-
-type CommentCreate struct {
-	Data   CommentCreateData
-	Select CommentSelect
-}
-
-type CommentCreateMany struct {
-	Data []CommentCreateData
 }
 
 func buildCommentWhere(d dialect.Dialect, alias string, args *argState, where *CommentWhereInput) string {
@@ -3579,226 +2725,6 @@ func FindFirstComment[T CommentModel](ctx context.Context, db bom.Querier, q Com
 	out := rows[0]
 	return &out, nil
 }
-func CreateOneComment[T CommentModel](ctx context.Context, db bom.Querier, q CommentCreate) (*T, error) {
-	d := dialectsqlite.New()
-	data := q.Data
-	if err := createCommentRecord(ctx, db, d, &data); err != nil {
-		return nil, err
-	}
-	if err := createCommentRelations(ctx, db, d, &data); err != nil {
-		return nil, err
-	}
-	var fetch func(context.Context, CommentSelect) (*T, error)
-	if fetch == nil {
-		if data.Id.IsSome() {
-			lookup := CommentUK_Id{
-				Id: data.Id.Value(),
-			}
-			fetch = func(ctx context.Context, sel CommentSelect) (*T, error) {
-				return FindUniqueComment[T](ctx, db, CommentFindUnique[CommentUK_Id]{
-					Where:  lookup,
-					Select: sel,
-				})
-			}
-		}
-	}
-	if fetch == nil {
-		return nil, fmt.Errorf("CommentCreate requires values for a unique constraint")
-	}
-	return fetch(ctx, q.Select)
-}
-
-func CreateManyComment(ctx context.Context, db bom.Querier, q CommentCreateMany) (int64, error) {
-	d := dialectsqlite.New()
-	if len(q.Data) == 0 {
-		return 0, nil
-	}
-	var total int64
-	for i := range q.Data {
-		data := q.Data[i]
-		if err := createCommentRecord(ctx, db, d, &data); err != nil {
-			return total, err
-		}
-		if err := createCommentRelations(ctx, db, d, &data); err != nil {
-			return total, err
-		}
-		total++
-	}
-	return total, nil
-}
-
-func createCommentRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, data *CommentCreateData) error {
-	state := newArgState(d)
-	var columns []string
-	var placeholders []string
-	if identityGenerator == nil {
-		identityGenerator = &bom.DefaultIdentityGenerator{}
-	}
-	var wantsAutoId bool
-	var wantsAutoVideoId bool
-	var wantsAutoAuthorId bool
-	var wantsAutoBody bool
-	var wantsAutoCreatedAt bool
-	if data.Id.IsSome() {
-		val := data.Id.Value()
-		columns = append(columns, d.QuoteIdent("id"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-		wantsAutoId = true
-	}
-	if data.VideoId.IsSome() {
-		val := data.VideoId.Value()
-		columns = append(columns, d.QuoteIdent("video_id"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-	}
-	if data.AuthorId.IsSome() {
-		val := data.AuthorId.Value()
-		columns = append(columns, d.QuoteIdent("author_id"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-	}
-	if data.Body.IsSome() {
-		val := data.Body.Value()
-		columns = append(columns, d.QuoteIdent("body"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-	}
-	if data.CreatedAt.IsSome() {
-		val := data.CreatedAt.Value()
-		columns = append(columns, d.QuoteIdent("created_at"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-	}
-	if err := ensureParamLimit(d, len(state.Args())); err != nil {
-		return err
-	}
-	sqlStr := buildInsertSQL(d, "comment", columns, placeholders)
-	autoCount := 0
-	if wantsAutoId {
-		autoCount++
-	}
-	if wantsAutoVideoId {
-		autoCount++
-	}
-	if wantsAutoAuthorId {
-		autoCount++
-	}
-	if wantsAutoBody {
-		autoCount++
-	}
-	if wantsAutoCreatedAt {
-		autoCount++
-	}
-	var returning bool
-	if d.Cap().InsertReturning && autoCount > 0 {
-		returning = true
-		var returningCols []string
-		if wantsAutoId {
-			returningCols = append(returningCols, d.QuoteIdent("id"))
-		}
-		if wantsAutoVideoId {
-			returningCols = append(returningCols, d.QuoteIdent("video_id"))
-		}
-		if wantsAutoAuthorId {
-			returningCols = append(returningCols, d.QuoteIdent("author_id"))
-		}
-		if wantsAutoBody {
-			returningCols = append(returningCols, d.QuoteIdent("body"))
-		}
-		if wantsAutoCreatedAt {
-			returningCols = append(returningCols, d.QuoteIdent("created_at"))
-		}
-		if len(returningCols) > 0 {
-			sqlStr = sqlStr + " RETURNING " + strings.Join(returningCols, ", ")
-		}
-	}
-	if returning {
-		rows, err := db.QueryContext(ctx, sqlStr, state.Args()...)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		var scanTargets []any
-		var retId uint64
-		if wantsAutoId {
-			scanTargets = append(scanTargets, &retId)
-		}
-		var retVideoId uint64
-		if wantsAutoVideoId {
-			scanTargets = append(scanTargets, &retVideoId)
-		}
-		var retAuthorId uint64
-		if wantsAutoAuthorId {
-			scanTargets = append(scanTargets, &retAuthorId)
-		}
-		var retBody string
-		if wantsAutoBody {
-			scanTargets = append(scanTargets, &retBody)
-		}
-		var retCreatedAt string
-		if wantsAutoCreatedAt {
-			scanTargets = append(scanTargets, &retCreatedAt)
-		}
-		if !rows.Next() {
-			if err := rows.Err(); err != nil {
-				return err
-			}
-			return fmt.Errorf("Comment insert returned no rows")
-		}
-		if err := rows.Scan(scanTargets...); err != nil {
-			return err
-		}
-		if wantsAutoId {
-			data.Id = opt.OVal(retId)
-		}
-		if wantsAutoVideoId {
-			data.VideoId = opt.OVal(retVideoId)
-		}
-		if wantsAutoAuthorId {
-			data.AuthorId = opt.OVal(retAuthorId)
-		}
-		if wantsAutoBody {
-			data.Body = opt.OVal(retBody)
-		}
-		if wantsAutoCreatedAt {
-			data.CreatedAt = opt.OVal(retCreatedAt)
-		}
-		return nil
-	}
-	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
-	if err != nil {
-		return err
-	}
-	if autoCount == 1 {
-		id, err := res.LastInsertId()
-		if err != nil {
-			return err
-		}
-		if wantsAutoId {
-			data.Id = opt.OVal(uint64(id))
-		}
-		if wantsAutoVideoId {
-			data.VideoId = opt.OVal(uint64(id))
-		}
-		if wantsAutoAuthorId {
-			data.AuthorId = opt.OVal(uint64(id))
-		}
-		if wantsAutoBody {
-			data.Body = opt.OVal(strconv.FormatInt(id, 10))
-		}
-		if wantsAutoCreatedAt {
-			data.CreatedAt = opt.OVal(strconv.FormatInt(id, 10))
-		}
-	} else if autoCount > 1 {
-		return fmt.Errorf("%s cannot populate multiple auto columns for comment without RETURNING", d.Name())
-	}
-	return nil
-}
-
-func createCommentRelations(ctx context.Context, db bom.Querier, d dialect.Dialect, data *CommentCreateData) error {
-	return nil
-}
 
 func queryCommentRows[T CommentModel](ctx context.Context, db bom.Querier, d dialect.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
 	sqlStr, args, err := planner.BuildFindMany(d, input)
@@ -3947,20 +2873,6 @@ type TagFindFirst struct {
 	OrderBy []TagOrderByInput
 	Skip    opt.Opt[int]
 	Select  TagSelect
-}
-type TagCreateData struct {
-	Id       opt.Opt[uint64]
-	Name     opt.Opt[string]
-	VideoTag []VideoTagCreateData
-}
-
-type TagCreate struct {
-	Data   TagCreateData
-	Select TagSelect
-}
-
-type TagCreateMany struct {
-	Data []TagCreateData
 }
 
 func buildTagWhere(d dialect.Dialect, alias string, args *argState, where *TagWhereInput) string {
@@ -4260,187 +3172,6 @@ func FindFirstTag[T TagModel](ctx context.Context, db bom.Querier, q TagFindFirs
 	out := rows[0]
 	return &out, nil
 }
-func CreateOneTag[T TagModel](ctx context.Context, db bom.Querier, q TagCreate) (*T, error) {
-	d := dialectsqlite.New()
-	data := q.Data
-	if err := createTagRecord(ctx, db, d, &data); err != nil {
-		return nil, err
-	}
-	if err := createTagRelations(ctx, db, d, &data); err != nil {
-		return nil, err
-	}
-	var fetch func(context.Context, TagSelect) (*T, error)
-	if fetch == nil {
-		if data.Id.IsSome() {
-			lookup := TagUK_Id{
-				Id: data.Id.Value(),
-			}
-			fetch = func(ctx context.Context, sel TagSelect) (*T, error) {
-				return FindUniqueTag[T](ctx, db, TagFindUnique[TagUK_Id]{
-					Where:  lookup,
-					Select: sel,
-				})
-			}
-		}
-	}
-	if fetch == nil {
-		if data.Name.IsSome() {
-			lookup := TagUK_Name{
-				Name: data.Name.Value(),
-			}
-			fetch = func(ctx context.Context, sel TagSelect) (*T, error) {
-				return FindUniqueTag[T](ctx, db, TagFindUnique[TagUK_Name]{
-					Where:  lookup,
-					Select: sel,
-				})
-			}
-		}
-	}
-	if fetch == nil {
-		return nil, fmt.Errorf("TagCreate requires values for a unique constraint")
-	}
-	return fetch(ctx, q.Select)
-}
-
-func CreateManyTag(ctx context.Context, db bom.Querier, q TagCreateMany) (int64, error) {
-	d := dialectsqlite.New()
-	if len(q.Data) == 0 {
-		return 0, nil
-	}
-	var total int64
-	for i := range q.Data {
-		data := q.Data[i]
-		if err := createTagRecord(ctx, db, d, &data); err != nil {
-			return total, err
-		}
-		if err := createTagRelations(ctx, db, d, &data); err != nil {
-			return total, err
-		}
-		total++
-	}
-	return total, nil
-}
-
-func createTagRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, data *TagCreateData) error {
-	state := newArgState(d)
-	var columns []string
-	var placeholders []string
-	if identityGenerator == nil {
-		identityGenerator = &bom.DefaultIdentityGenerator{}
-	}
-	var wantsAutoId bool
-	var wantsAutoName bool
-	if data.Id.IsSome() {
-		val := data.Id.Value()
-		columns = append(columns, d.QuoteIdent("id"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-		wantsAutoId = true
-	}
-	if data.Name.IsSome() {
-		val := data.Name.Value()
-		columns = append(columns, d.QuoteIdent("name"))
-		placeholders = append(placeholders, state.Add(val))
-	} else {
-	}
-	if err := ensureParamLimit(d, len(state.Args())); err != nil {
-		return err
-	}
-	sqlStr := buildInsertSQL(d, "tag", columns, placeholders)
-	autoCount := 0
-	if wantsAutoId {
-		autoCount++
-	}
-	if wantsAutoName {
-		autoCount++
-	}
-	var returning bool
-	if d.Cap().InsertReturning && autoCount > 0 {
-		returning = true
-		var returningCols []string
-		if wantsAutoId {
-			returningCols = append(returningCols, d.QuoteIdent("id"))
-		}
-		if wantsAutoName {
-			returningCols = append(returningCols, d.QuoteIdent("name"))
-		}
-		if len(returningCols) > 0 {
-			sqlStr = sqlStr + " RETURNING " + strings.Join(returningCols, ", ")
-		}
-	}
-	if returning {
-		rows, err := db.QueryContext(ctx, sqlStr, state.Args()...)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		var scanTargets []any
-		var retId uint64
-		if wantsAutoId {
-			scanTargets = append(scanTargets, &retId)
-		}
-		var retName string
-		if wantsAutoName {
-			scanTargets = append(scanTargets, &retName)
-		}
-		if !rows.Next() {
-			if err := rows.Err(); err != nil {
-				return err
-			}
-			return fmt.Errorf("Tag insert returned no rows")
-		}
-		if err := rows.Scan(scanTargets...); err != nil {
-			return err
-		}
-		if wantsAutoId {
-			data.Id = opt.OVal(retId)
-		}
-		if wantsAutoName {
-			data.Name = opt.OVal(retName)
-		}
-		return nil
-	}
-	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
-	if err != nil {
-		return err
-	}
-	if autoCount == 1 {
-		id, err := res.LastInsertId()
-		if err != nil {
-			return err
-		}
-		if wantsAutoId {
-			data.Id = opt.OVal(uint64(id))
-		}
-		if wantsAutoName {
-			data.Name = opt.OVal(strconv.FormatInt(id, 10))
-		}
-	} else if autoCount > 1 {
-		return fmt.Errorf("%s cannot populate multiple auto columns for tag without RETURNING", d.Name())
-	}
-	return nil
-}
-
-func createTagRelations(ctx context.Context, db bom.Querier, d dialect.Dialect, data *TagCreateData) error {
-	if len(data.VideoTag) > 0 {
-		for i := range data.VideoTag {
-			child := &data.VideoTag[i]
-			if !child.TagId.IsSome() {
-				if !data.Id.IsSome() {
-					return fmt.Errorf("Tag: missing id for relation VideoTag")
-				}
-				child.TagId = data.Id
-			}
-			if err := createVideoTagRecord(ctx, db, d, child); err != nil {
-				return err
-			}
-			if err := createVideoTagRelations(ctx, db, d, child); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
 
 func queryTagRows[T TagModel](ctx context.Context, db bom.Querier, d dialect.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
 	sqlStr, args, err := planner.BuildFindMany(d, input)
@@ -4603,19 +3334,6 @@ type VideoTagFindFirst struct {
 	OrderBy []VideoTagOrderByInput
 	Skip    opt.Opt[int]
 	Select  VideoTagSelect
-}
-type VideoTagCreateData struct {
-	VideoId opt.Opt[uint64]
-	TagId   opt.Opt[uint64]
-}
-
-type VideoTagCreate struct {
-	Data   VideoTagCreateData
-	Select VideoTagSelect
-}
-
-type VideoTagCreateMany struct {
-	Data []VideoTagCreateData
 }
 
 func buildVideoTagWhere(d dialect.Dialect, alias string, args *argState, where *VideoTagWhereInput) string {
@@ -5021,6 +3739,1359 @@ func FindFirstVideoTag[T VideoTagModel](ctx context.Context, db bom.Querier, q V
 	out := rows[0]
 	return &out, nil
 }
+
+func queryVideoTagRows[T VideoTagModel](ctx context.Context, db bom.Querier, d dialect.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
+	sqlStr, args, err := planner.BuildFindMany(d, input)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.QueryContext(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []T
+	if expectArray {
+		if rows.Next() {
+			var raw []byte
+			if err := rows.Scan(&raw); err != nil {
+				return nil, err
+			}
+			if len(raw) == 0 {
+				raw = []byte("[]")
+			}
+			var payload []json.RawMessage
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				return nil, err
+			}
+			for _, item := range payload {
+				item = normalizeJSONRaw(item)
+				var rec VideoTag
+				if err := json.Unmarshal(item, &rec); err != nil {
+					return nil, err
+				}
+				result = append(result, T(rec))
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		if len(raw) == 0 {
+			raw = []byte("{}")
+		}
+		raw = normalizeJSONRaw(raw)
+		var rec VideoTag
+		if err := json.Unmarshal(raw, &rec); err != nil {
+			return nil, err
+		}
+		result = append(result, T(rec))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+type AuthorCreateData struct {
+	Id            opt.Opt[uint64]
+	Name          opt.Opt[string]
+	Email         opt.Opt[string]
+	CreatedAt     opt.Opt[string]
+	AuthorProfile *AuthorProfileCreateData
+	Comment       []CommentCreateData
+	Video         []VideoCreateData
+}
+
+type AuthorCreate struct {
+	Data   AuthorCreateData
+	Select AuthorSelect
+}
+
+type AuthorCreateMany struct {
+	Data []AuthorCreateData
+}
+
+func CreateOneAuthor[T AuthorModel](ctx context.Context, db bom.Querier, q AuthorCreate) (*T, error) {
+	d := dialectsqlite.New()
+	data := q.Data
+	if err := createAuthorRecord(ctx, db, d, &data); err != nil {
+		return nil, err
+	}
+	if err := createAuthorRelations(ctx, db, d, &data); err != nil {
+		return nil, err
+	}
+	var fetch func(context.Context, AuthorSelect) (*T, error)
+	if fetch == nil {
+		if data.Id.IsSome() {
+			lookup := AuthorUK_Id{
+				Id: data.Id.Value(),
+			}
+			fetch = func(ctx context.Context, sel AuthorSelect) (*T, error) {
+				return FindUniqueAuthor[T](ctx, db, AuthorFindUnique[AuthorUK_Id]{
+					Where:  lookup,
+					Select: sel,
+				})
+			}
+		}
+	}
+	if fetch == nil {
+		if data.Email.IsSome() {
+			lookup := AuthorUK_Email{
+				Email: data.Email.Value(),
+			}
+			fetch = func(ctx context.Context, sel AuthorSelect) (*T, error) {
+				return FindUniqueAuthor[T](ctx, db, AuthorFindUnique[AuthorUK_Email]{
+					Where:  lookup,
+					Select: sel,
+				})
+			}
+		}
+	}
+	if fetch == nil {
+		return nil, fmt.Errorf("AuthorCreate requires values for a unique constraint")
+	}
+	return fetch(ctx, q.Select)
+}
+
+func CreateManyAuthor(ctx context.Context, db bom.Querier, q AuthorCreateMany) (int64, error) {
+	d := dialectsqlite.New()
+	if len(q.Data) == 0 {
+		return 0, nil
+	}
+	var total int64
+	for i := range q.Data {
+		data := q.Data[i]
+		if err := createAuthorRecord(ctx, db, d, &data); err != nil {
+			return total, err
+		}
+		if err := createAuthorRelations(ctx, db, d, &data); err != nil {
+			return total, err
+		}
+		total++
+	}
+	return total, nil
+}
+
+func createAuthorRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, data *AuthorCreateData) error {
+	state := newArgState(d)
+	var columns []string
+	var placeholders []string
+	if identityGenerator == nil {
+		identityGenerator = &bom.DefaultIdentityGenerator{}
+	}
+	var wantsAutoId bool
+	var wantsAutoName bool
+	var wantsAutoEmail bool
+	var wantsAutoCreatedAt bool
+	if data.Id.IsSome() {
+		val := data.Id.Value()
+		columns = append(columns, d.QuoteIdent("id"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+		wantsAutoId = true
+	}
+	if data.Name.IsSome() {
+		val := data.Name.Value()
+		columns = append(columns, d.QuoteIdent("name"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+	}
+	if data.Email.IsSome() {
+		val := data.Email.Value()
+		columns = append(columns, d.QuoteIdent("email"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+	}
+	if data.CreatedAt.IsSome() {
+		val := data.CreatedAt.Value()
+		columns = append(columns, d.QuoteIdent("created_at"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return err
+	}
+	sqlStr := buildInsertSQL(d, "author", columns, placeholders)
+	autoCount := 0
+	if wantsAutoId {
+		autoCount++
+	}
+	if wantsAutoName {
+		autoCount++
+	}
+	if wantsAutoEmail {
+		autoCount++
+	}
+	if wantsAutoCreatedAt {
+		autoCount++
+	}
+	var returning bool
+	if d.Cap().InsertReturning && autoCount > 0 {
+		returning = true
+		var returningCols []string
+		if wantsAutoId {
+			returningCols = append(returningCols, d.QuoteIdent("id"))
+		}
+		if wantsAutoName {
+			returningCols = append(returningCols, d.QuoteIdent("name"))
+		}
+		if wantsAutoEmail {
+			returningCols = append(returningCols, d.QuoteIdent("email"))
+		}
+		if wantsAutoCreatedAt {
+			returningCols = append(returningCols, d.QuoteIdent("created_at"))
+		}
+		if len(returningCols) > 0 {
+			sqlStr = sqlStr + " RETURNING " + strings.Join(returningCols, ", ")
+		}
+	}
+	if returning {
+		rows, err := db.QueryContext(ctx, sqlStr, state.Args()...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		var scanTargets []any
+		var retId uint64
+		if wantsAutoId {
+			scanTargets = append(scanTargets, &retId)
+		}
+		var retName string
+		if wantsAutoName {
+			scanTargets = append(scanTargets, &retName)
+		}
+		var retEmail string
+		if wantsAutoEmail {
+			scanTargets = append(scanTargets, &retEmail)
+		}
+		var retCreatedAt string
+		if wantsAutoCreatedAt {
+			scanTargets = append(scanTargets, &retCreatedAt)
+		}
+		if !rows.Next() {
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			return fmt.Errorf("Author insert returned no rows")
+		}
+		if err := rows.Scan(scanTargets...); err != nil {
+			return err
+		}
+		if wantsAutoId {
+			data.Id = opt.OVal(retId)
+		}
+		if wantsAutoName {
+			data.Name = opt.OVal(retName)
+		}
+		if wantsAutoEmail {
+			data.Email = opt.OVal(retEmail)
+		}
+		if wantsAutoCreatedAt {
+			data.CreatedAt = opt.OVal(retCreatedAt)
+		}
+		return nil
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return err
+	}
+	if autoCount == 1 {
+		id, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		if wantsAutoId {
+			data.Id = opt.OVal(uint64(id))
+		}
+		if wantsAutoName {
+			data.Name = opt.OVal(strconv.FormatInt(id, 10))
+		}
+		if wantsAutoEmail {
+			data.Email = opt.OVal(strconv.FormatInt(id, 10))
+		}
+		if wantsAutoCreatedAt {
+			data.CreatedAt = opt.OVal(strconv.FormatInt(id, 10))
+		}
+	} else if autoCount > 1 {
+		return fmt.Errorf("%s cannot populate multiple auto columns for author without RETURNING", d.Name())
+	}
+	return nil
+}
+
+func createAuthorRelations(ctx context.Context, db bom.Querier, d dialect.Dialect, data *AuthorCreateData) error {
+	if data.AuthorProfile != nil {
+		child := data.AuthorProfile
+		if !child.AuthorId.IsSome() {
+			if !data.Id.IsSome() {
+				return fmt.Errorf("Author: missing id for relation AuthorProfile")
+			}
+			child.AuthorId = data.Id
+		}
+		if err := createAuthorProfileRecord(ctx, db, d, child); err != nil {
+			return err
+		}
+		if err := createAuthorProfileRelations(ctx, db, d, child); err != nil {
+			return err
+		}
+	}
+	if len(data.Comment) > 0 {
+		for i := range data.Comment {
+			child := &data.Comment[i]
+			if !child.AuthorId.IsSome() {
+				if !data.Id.IsSome() {
+					return fmt.Errorf("Author: missing id for relation Comment")
+				}
+				child.AuthorId = data.Id
+			}
+			if err := createCommentRecord(ctx, db, d, child); err != nil {
+				return err
+			}
+			if err := createCommentRelations(ctx, db, d, child); err != nil {
+				return err
+			}
+		}
+	}
+	if len(data.Video) > 0 {
+		for i := range data.Video {
+			child := &data.Video[i]
+			if !child.AuthorId.IsSome() {
+				if !data.Id.IsSome() {
+					return fmt.Errorf("Author: missing id for relation Video")
+				}
+				child.AuthorId = data.Id
+			}
+			if err := createVideoRecord(ctx, db, d, child); err != nil {
+				return err
+			}
+			if err := createVideoRelations(ctx, db, d, child); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+type AuthorProfileCreateData struct {
+	Id        opt.Opt[uint64]
+	AuthorId  opt.Opt[uint64]
+	Bio       opt.Opt[string]
+	AvatarUrl opt.Opt[string]
+	CreatedAt opt.Opt[string]
+}
+
+type AuthorProfileCreate struct {
+	Data   AuthorProfileCreateData
+	Select AuthorProfileSelect
+}
+
+type AuthorProfileCreateMany struct {
+	Data []AuthorProfileCreateData
+}
+
+func CreateOneAuthorProfile[T AuthorProfileModel](ctx context.Context, db bom.Querier, q AuthorProfileCreate) (*T, error) {
+	d := dialectsqlite.New()
+	data := q.Data
+	if err := createAuthorProfileRecord(ctx, db, d, &data); err != nil {
+		return nil, err
+	}
+	if err := createAuthorProfileRelations(ctx, db, d, &data); err != nil {
+		return nil, err
+	}
+	var fetch func(context.Context, AuthorProfileSelect) (*T, error)
+	if fetch == nil {
+		if data.Id.IsSome() {
+			lookup := AuthorProfileUK_Id{
+				Id: data.Id.Value(),
+			}
+			fetch = func(ctx context.Context, sel AuthorProfileSelect) (*T, error) {
+				return FindUniqueAuthorProfile[T](ctx, db, AuthorProfileFindUnique[AuthorProfileUK_Id]{
+					Where:  lookup,
+					Select: sel,
+				})
+			}
+		}
+	}
+	if fetch == nil {
+		if data.AuthorId.IsSome() {
+			lookup := AuthorProfileUK_AuthorId{
+				AuthorId: data.AuthorId.Value(),
+			}
+			fetch = func(ctx context.Context, sel AuthorProfileSelect) (*T, error) {
+				return FindUniqueAuthorProfile[T](ctx, db, AuthorProfileFindUnique[AuthorProfileUK_AuthorId]{
+					Where:  lookup,
+					Select: sel,
+				})
+			}
+		}
+	}
+	if fetch == nil {
+		return nil, fmt.Errorf("AuthorProfileCreate requires values for a unique constraint")
+	}
+	return fetch(ctx, q.Select)
+}
+
+func CreateManyAuthorProfile(ctx context.Context, db bom.Querier, q AuthorProfileCreateMany) (int64, error) {
+	d := dialectsqlite.New()
+	if len(q.Data) == 0 {
+		return 0, nil
+	}
+	var total int64
+	for i := range q.Data {
+		data := q.Data[i]
+		if err := createAuthorProfileRecord(ctx, db, d, &data); err != nil {
+			return total, err
+		}
+		if err := createAuthorProfileRelations(ctx, db, d, &data); err != nil {
+			return total, err
+		}
+		total++
+	}
+	return total, nil
+}
+
+func createAuthorProfileRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, data *AuthorProfileCreateData) error {
+	state := newArgState(d)
+	var columns []string
+	var placeholders []string
+	if identityGenerator == nil {
+		identityGenerator = &bom.DefaultIdentityGenerator{}
+	}
+	var wantsAutoId bool
+	var wantsAutoAuthorId bool
+	var wantsAutoBio bool
+	var wantsAutoAvatarUrl bool
+	var wantsAutoCreatedAt bool
+	if data.Id.IsSome() {
+		val := data.Id.Value()
+		columns = append(columns, d.QuoteIdent("id"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+		wantsAutoId = true
+	}
+	if data.AuthorId.IsSome() {
+		val := data.AuthorId.Value()
+		columns = append(columns, d.QuoteIdent("author_id"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+	}
+	if data.Bio.IsSome() {
+		val := data.Bio.Value()
+		columns = append(columns, d.QuoteIdent("bio"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+	}
+	if data.AvatarUrl.IsSome() {
+		val := data.AvatarUrl.Value()
+		columns = append(columns, d.QuoteIdent("avatar_url"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+	}
+	if data.CreatedAt.IsSome() {
+		val := data.CreatedAt.Value()
+		columns = append(columns, d.QuoteIdent("created_at"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return err
+	}
+	sqlStr := buildInsertSQL(d, "author_profile", columns, placeholders)
+	autoCount := 0
+	if wantsAutoId {
+		autoCount++
+	}
+	if wantsAutoAuthorId {
+		autoCount++
+	}
+	if wantsAutoBio {
+		autoCount++
+	}
+	if wantsAutoAvatarUrl {
+		autoCount++
+	}
+	if wantsAutoCreatedAt {
+		autoCount++
+	}
+	var returning bool
+	if d.Cap().InsertReturning && autoCount > 0 {
+		returning = true
+		var returningCols []string
+		if wantsAutoId {
+			returningCols = append(returningCols, d.QuoteIdent("id"))
+		}
+		if wantsAutoAuthorId {
+			returningCols = append(returningCols, d.QuoteIdent("author_id"))
+		}
+		if wantsAutoBio {
+			returningCols = append(returningCols, d.QuoteIdent("bio"))
+		}
+		if wantsAutoAvatarUrl {
+			returningCols = append(returningCols, d.QuoteIdent("avatar_url"))
+		}
+		if wantsAutoCreatedAt {
+			returningCols = append(returningCols, d.QuoteIdent("created_at"))
+		}
+		if len(returningCols) > 0 {
+			sqlStr = sqlStr + " RETURNING " + strings.Join(returningCols, ", ")
+		}
+	}
+	if returning {
+		rows, err := db.QueryContext(ctx, sqlStr, state.Args()...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		var scanTargets []any
+		var retId uint64
+		if wantsAutoId {
+			scanTargets = append(scanTargets, &retId)
+		}
+		var retAuthorId uint64
+		if wantsAutoAuthorId {
+			scanTargets = append(scanTargets, &retAuthorId)
+		}
+		var retBio string
+		if wantsAutoBio {
+			scanTargets = append(scanTargets, &retBio)
+		}
+		var retAvatarUrl string
+		if wantsAutoAvatarUrl {
+			scanTargets = append(scanTargets, &retAvatarUrl)
+		}
+		var retCreatedAt string
+		if wantsAutoCreatedAt {
+			scanTargets = append(scanTargets, &retCreatedAt)
+		}
+		if !rows.Next() {
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			return fmt.Errorf("AuthorProfile insert returned no rows")
+		}
+		if err := rows.Scan(scanTargets...); err != nil {
+			return err
+		}
+		if wantsAutoId {
+			data.Id = opt.OVal(retId)
+		}
+		if wantsAutoAuthorId {
+			data.AuthorId = opt.OVal(retAuthorId)
+		}
+		if wantsAutoBio {
+			data.Bio = opt.OVal(retBio)
+		}
+		if wantsAutoAvatarUrl {
+			data.AvatarUrl = opt.OVal(retAvatarUrl)
+		}
+		if wantsAutoCreatedAt {
+			data.CreatedAt = opt.OVal(retCreatedAt)
+		}
+		return nil
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return err
+	}
+	if autoCount == 1 {
+		id, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		if wantsAutoId {
+			data.Id = opt.OVal(uint64(id))
+		}
+		if wantsAutoAuthorId {
+			data.AuthorId = opt.OVal(uint64(id))
+		}
+		if wantsAutoBio {
+			data.Bio = opt.OVal(strconv.FormatInt(id, 10))
+		}
+		if wantsAutoAvatarUrl {
+			data.AvatarUrl = opt.OVal(strconv.FormatInt(id, 10))
+		}
+		if wantsAutoCreatedAt {
+			data.CreatedAt = opt.OVal(strconv.FormatInt(id, 10))
+		}
+	} else if autoCount > 1 {
+		return fmt.Errorf("%s cannot populate multiple auto columns for author_profile without RETURNING", d.Name())
+	}
+	return nil
+}
+
+func createAuthorProfileRelations(ctx context.Context, db bom.Querier, d dialect.Dialect, data *AuthorProfileCreateData) error {
+	return nil
+}
+
+type VideoCreateData struct {
+	Id          opt.Opt[uint64]
+	Title       opt.Opt[string]
+	Slug        opt.Opt[string]
+	AuthorId    opt.Opt[uint64]
+	Description opt.Opt[string]
+	CreatedAt   opt.Opt[string]
+	Comment     []CommentCreateData
+	VideoTag    []VideoTagCreateData
+}
+
+type VideoCreate struct {
+	Data   VideoCreateData
+	Select VideoSelect
+}
+
+type VideoCreateMany struct {
+	Data []VideoCreateData
+}
+
+func CreateOneVideo[T VideoModel](ctx context.Context, db bom.Querier, q VideoCreate) (*T, error) {
+	d := dialectsqlite.New()
+	data := q.Data
+	if err := createVideoRecord(ctx, db, d, &data); err != nil {
+		return nil, err
+	}
+	if err := createVideoRelations(ctx, db, d, &data); err != nil {
+		return nil, err
+	}
+	var fetch func(context.Context, VideoSelect) (*T, error)
+	if fetch == nil {
+		if data.Id.IsSome() {
+			lookup := VideoUK_Id{
+				Id: data.Id.Value(),
+			}
+			fetch = func(ctx context.Context, sel VideoSelect) (*T, error) {
+				return FindUniqueVideo[T](ctx, db, VideoFindUnique[VideoUK_Id]{
+					Where:  lookup,
+					Select: sel,
+				})
+			}
+		}
+	}
+	if fetch == nil {
+		if data.Slug.IsSome() {
+			lookup := VideoUK_Slug{
+				Slug: data.Slug.Value(),
+			}
+			fetch = func(ctx context.Context, sel VideoSelect) (*T, error) {
+				return FindUniqueVideo[T](ctx, db, VideoFindUnique[VideoUK_Slug]{
+					Where:  lookup,
+					Select: sel,
+				})
+			}
+		}
+	}
+	if fetch == nil {
+		return nil, fmt.Errorf("VideoCreate requires values for a unique constraint")
+	}
+	return fetch(ctx, q.Select)
+}
+
+func CreateManyVideo(ctx context.Context, db bom.Querier, q VideoCreateMany) (int64, error) {
+	d := dialectsqlite.New()
+	if len(q.Data) == 0 {
+		return 0, nil
+	}
+	var total int64
+	for i := range q.Data {
+		data := q.Data[i]
+		if err := createVideoRecord(ctx, db, d, &data); err != nil {
+			return total, err
+		}
+		if err := createVideoRelations(ctx, db, d, &data); err != nil {
+			return total, err
+		}
+		total++
+	}
+	return total, nil
+}
+
+func createVideoRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, data *VideoCreateData) error {
+	state := newArgState(d)
+	var columns []string
+	var placeholders []string
+	if identityGenerator == nil {
+		identityGenerator = &bom.DefaultIdentityGenerator{}
+	}
+	var wantsAutoId bool
+	var wantsAutoTitle bool
+	var wantsAutoSlug bool
+	var wantsAutoAuthorId bool
+	var wantsAutoDescription bool
+	var wantsAutoCreatedAt bool
+	if data.Id.IsSome() {
+		val := data.Id.Value()
+		columns = append(columns, d.QuoteIdent("id"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+		wantsAutoId = true
+	}
+	if data.Title.IsSome() {
+		val := data.Title.Value()
+		columns = append(columns, d.QuoteIdent("title"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+	}
+	if data.Slug.IsSome() {
+		val := data.Slug.Value()
+		columns = append(columns, d.QuoteIdent("slug"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+	}
+	if data.AuthorId.IsSome() {
+		val := data.AuthorId.Value()
+		columns = append(columns, d.QuoteIdent("author_id"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+	}
+	if data.Description.IsSome() {
+		val := data.Description.Value()
+		columns = append(columns, d.QuoteIdent("description"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+	}
+	if data.CreatedAt.IsSome() {
+		val := data.CreatedAt.Value()
+		columns = append(columns, d.QuoteIdent("created_at"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return err
+	}
+	sqlStr := buildInsertSQL(d, "video", columns, placeholders)
+	autoCount := 0
+	if wantsAutoId {
+		autoCount++
+	}
+	if wantsAutoTitle {
+		autoCount++
+	}
+	if wantsAutoSlug {
+		autoCount++
+	}
+	if wantsAutoAuthorId {
+		autoCount++
+	}
+	if wantsAutoDescription {
+		autoCount++
+	}
+	if wantsAutoCreatedAt {
+		autoCount++
+	}
+	var returning bool
+	if d.Cap().InsertReturning && autoCount > 0 {
+		returning = true
+		var returningCols []string
+		if wantsAutoId {
+			returningCols = append(returningCols, d.QuoteIdent("id"))
+		}
+		if wantsAutoTitle {
+			returningCols = append(returningCols, d.QuoteIdent("title"))
+		}
+		if wantsAutoSlug {
+			returningCols = append(returningCols, d.QuoteIdent("slug"))
+		}
+		if wantsAutoAuthorId {
+			returningCols = append(returningCols, d.QuoteIdent("author_id"))
+		}
+		if wantsAutoDescription {
+			returningCols = append(returningCols, d.QuoteIdent("description"))
+		}
+		if wantsAutoCreatedAt {
+			returningCols = append(returningCols, d.QuoteIdent("created_at"))
+		}
+		if len(returningCols) > 0 {
+			sqlStr = sqlStr + " RETURNING " + strings.Join(returningCols, ", ")
+		}
+	}
+	if returning {
+		rows, err := db.QueryContext(ctx, sqlStr, state.Args()...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		var scanTargets []any
+		var retId uint64
+		if wantsAutoId {
+			scanTargets = append(scanTargets, &retId)
+		}
+		var retTitle string
+		if wantsAutoTitle {
+			scanTargets = append(scanTargets, &retTitle)
+		}
+		var retSlug string
+		if wantsAutoSlug {
+			scanTargets = append(scanTargets, &retSlug)
+		}
+		var retAuthorId uint64
+		if wantsAutoAuthorId {
+			scanTargets = append(scanTargets, &retAuthorId)
+		}
+		var retDescription string
+		if wantsAutoDescription {
+			scanTargets = append(scanTargets, &retDescription)
+		}
+		var retCreatedAt string
+		if wantsAutoCreatedAt {
+			scanTargets = append(scanTargets, &retCreatedAt)
+		}
+		if !rows.Next() {
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			return fmt.Errorf("Video insert returned no rows")
+		}
+		if err := rows.Scan(scanTargets...); err != nil {
+			return err
+		}
+		if wantsAutoId {
+			data.Id = opt.OVal(retId)
+		}
+		if wantsAutoTitle {
+			data.Title = opt.OVal(retTitle)
+		}
+		if wantsAutoSlug {
+			data.Slug = opt.OVal(retSlug)
+		}
+		if wantsAutoAuthorId {
+			data.AuthorId = opt.OVal(retAuthorId)
+		}
+		if wantsAutoDescription {
+			data.Description = opt.OVal(retDescription)
+		}
+		if wantsAutoCreatedAt {
+			data.CreatedAt = opt.OVal(retCreatedAt)
+		}
+		return nil
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return err
+	}
+	if autoCount == 1 {
+		id, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		if wantsAutoId {
+			data.Id = opt.OVal(uint64(id))
+		}
+		if wantsAutoTitle {
+			data.Title = opt.OVal(strconv.FormatInt(id, 10))
+		}
+		if wantsAutoSlug {
+			data.Slug = opt.OVal(strconv.FormatInt(id, 10))
+		}
+		if wantsAutoAuthorId {
+			data.AuthorId = opt.OVal(uint64(id))
+		}
+		if wantsAutoDescription {
+			data.Description = opt.OVal(strconv.FormatInt(id, 10))
+		}
+		if wantsAutoCreatedAt {
+			data.CreatedAt = opt.OVal(strconv.FormatInt(id, 10))
+		}
+	} else if autoCount > 1 {
+		return fmt.Errorf("%s cannot populate multiple auto columns for video without RETURNING", d.Name())
+	}
+	return nil
+}
+
+func createVideoRelations(ctx context.Context, db bom.Querier, d dialect.Dialect, data *VideoCreateData) error {
+	if len(data.Comment) > 0 {
+		for i := range data.Comment {
+			child := &data.Comment[i]
+			if !child.VideoId.IsSome() {
+				if !data.Id.IsSome() {
+					return fmt.Errorf("Video: missing id for relation Comment")
+				}
+				child.VideoId = data.Id
+			}
+			if !child.AuthorId.IsSome() && data.AuthorId.IsSome() {
+				child.AuthorId = data.AuthorId
+			}
+			if err := createCommentRecord(ctx, db, d, child); err != nil {
+				return err
+			}
+			if err := createCommentRelations(ctx, db, d, child); err != nil {
+				return err
+			}
+		}
+	}
+	if len(data.VideoTag) > 0 {
+		for i := range data.VideoTag {
+			child := &data.VideoTag[i]
+			if !child.VideoId.IsSome() {
+				if !data.Id.IsSome() {
+					return fmt.Errorf("Video: missing id for relation VideoTag")
+				}
+				child.VideoId = data.Id
+			}
+			if err := createVideoTagRecord(ctx, db, d, child); err != nil {
+				return err
+			}
+			if err := createVideoTagRelations(ctx, db, d, child); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+type CommentCreateData struct {
+	Id        opt.Opt[uint64]
+	VideoId   opt.Opt[uint64]
+	AuthorId  opt.Opt[uint64]
+	Body      opt.Opt[string]
+	CreatedAt opt.Opt[string]
+}
+
+type CommentCreate struct {
+	Data   CommentCreateData
+	Select CommentSelect
+}
+
+type CommentCreateMany struct {
+	Data []CommentCreateData
+}
+
+func CreateOneComment[T CommentModel](ctx context.Context, db bom.Querier, q CommentCreate) (*T, error) {
+	d := dialectsqlite.New()
+	data := q.Data
+	if err := createCommentRecord(ctx, db, d, &data); err != nil {
+		return nil, err
+	}
+	if err := createCommentRelations(ctx, db, d, &data); err != nil {
+		return nil, err
+	}
+	var fetch func(context.Context, CommentSelect) (*T, error)
+	if fetch == nil {
+		if data.Id.IsSome() {
+			lookup := CommentUK_Id{
+				Id: data.Id.Value(),
+			}
+			fetch = func(ctx context.Context, sel CommentSelect) (*T, error) {
+				return FindUniqueComment[T](ctx, db, CommentFindUnique[CommentUK_Id]{
+					Where:  lookup,
+					Select: sel,
+				})
+			}
+		}
+	}
+	if fetch == nil {
+		return nil, fmt.Errorf("CommentCreate requires values for a unique constraint")
+	}
+	return fetch(ctx, q.Select)
+}
+
+func CreateManyComment(ctx context.Context, db bom.Querier, q CommentCreateMany) (int64, error) {
+	d := dialectsqlite.New()
+	if len(q.Data) == 0 {
+		return 0, nil
+	}
+	var total int64
+	for i := range q.Data {
+		data := q.Data[i]
+		if err := createCommentRecord(ctx, db, d, &data); err != nil {
+			return total, err
+		}
+		if err := createCommentRelations(ctx, db, d, &data); err != nil {
+			return total, err
+		}
+		total++
+	}
+	return total, nil
+}
+
+func createCommentRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, data *CommentCreateData) error {
+	state := newArgState(d)
+	var columns []string
+	var placeholders []string
+	if identityGenerator == nil {
+		identityGenerator = &bom.DefaultIdentityGenerator{}
+	}
+	var wantsAutoId bool
+	var wantsAutoVideoId bool
+	var wantsAutoAuthorId bool
+	var wantsAutoBody bool
+	var wantsAutoCreatedAt bool
+	if data.Id.IsSome() {
+		val := data.Id.Value()
+		columns = append(columns, d.QuoteIdent("id"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+		wantsAutoId = true
+	}
+	if data.VideoId.IsSome() {
+		val := data.VideoId.Value()
+		columns = append(columns, d.QuoteIdent("video_id"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+	}
+	if data.AuthorId.IsSome() {
+		val := data.AuthorId.Value()
+		columns = append(columns, d.QuoteIdent("author_id"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+	}
+	if data.Body.IsSome() {
+		val := data.Body.Value()
+		columns = append(columns, d.QuoteIdent("body"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+	}
+	if data.CreatedAt.IsSome() {
+		val := data.CreatedAt.Value()
+		columns = append(columns, d.QuoteIdent("created_at"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return err
+	}
+	sqlStr := buildInsertSQL(d, "comment", columns, placeholders)
+	autoCount := 0
+	if wantsAutoId {
+		autoCount++
+	}
+	if wantsAutoVideoId {
+		autoCount++
+	}
+	if wantsAutoAuthorId {
+		autoCount++
+	}
+	if wantsAutoBody {
+		autoCount++
+	}
+	if wantsAutoCreatedAt {
+		autoCount++
+	}
+	var returning bool
+	if d.Cap().InsertReturning && autoCount > 0 {
+		returning = true
+		var returningCols []string
+		if wantsAutoId {
+			returningCols = append(returningCols, d.QuoteIdent("id"))
+		}
+		if wantsAutoVideoId {
+			returningCols = append(returningCols, d.QuoteIdent("video_id"))
+		}
+		if wantsAutoAuthorId {
+			returningCols = append(returningCols, d.QuoteIdent("author_id"))
+		}
+		if wantsAutoBody {
+			returningCols = append(returningCols, d.QuoteIdent("body"))
+		}
+		if wantsAutoCreatedAt {
+			returningCols = append(returningCols, d.QuoteIdent("created_at"))
+		}
+		if len(returningCols) > 0 {
+			sqlStr = sqlStr + " RETURNING " + strings.Join(returningCols, ", ")
+		}
+	}
+	if returning {
+		rows, err := db.QueryContext(ctx, sqlStr, state.Args()...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		var scanTargets []any
+		var retId uint64
+		if wantsAutoId {
+			scanTargets = append(scanTargets, &retId)
+		}
+		var retVideoId uint64
+		if wantsAutoVideoId {
+			scanTargets = append(scanTargets, &retVideoId)
+		}
+		var retAuthorId uint64
+		if wantsAutoAuthorId {
+			scanTargets = append(scanTargets, &retAuthorId)
+		}
+		var retBody string
+		if wantsAutoBody {
+			scanTargets = append(scanTargets, &retBody)
+		}
+		var retCreatedAt string
+		if wantsAutoCreatedAt {
+			scanTargets = append(scanTargets, &retCreatedAt)
+		}
+		if !rows.Next() {
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			return fmt.Errorf("Comment insert returned no rows")
+		}
+		if err := rows.Scan(scanTargets...); err != nil {
+			return err
+		}
+		if wantsAutoId {
+			data.Id = opt.OVal(retId)
+		}
+		if wantsAutoVideoId {
+			data.VideoId = opt.OVal(retVideoId)
+		}
+		if wantsAutoAuthorId {
+			data.AuthorId = opt.OVal(retAuthorId)
+		}
+		if wantsAutoBody {
+			data.Body = opt.OVal(retBody)
+		}
+		if wantsAutoCreatedAt {
+			data.CreatedAt = opt.OVal(retCreatedAt)
+		}
+		return nil
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return err
+	}
+	if autoCount == 1 {
+		id, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		if wantsAutoId {
+			data.Id = opt.OVal(uint64(id))
+		}
+		if wantsAutoVideoId {
+			data.VideoId = opt.OVal(uint64(id))
+		}
+		if wantsAutoAuthorId {
+			data.AuthorId = opt.OVal(uint64(id))
+		}
+		if wantsAutoBody {
+			data.Body = opt.OVal(strconv.FormatInt(id, 10))
+		}
+		if wantsAutoCreatedAt {
+			data.CreatedAt = opt.OVal(strconv.FormatInt(id, 10))
+		}
+	} else if autoCount > 1 {
+		return fmt.Errorf("%s cannot populate multiple auto columns for comment without RETURNING", d.Name())
+	}
+	return nil
+}
+
+func createCommentRelations(ctx context.Context, db bom.Querier, d dialect.Dialect, data *CommentCreateData) error {
+	return nil
+}
+
+type TagCreateData struct {
+	Id       opt.Opt[uint64]
+	Name     opt.Opt[string]
+	VideoTag []VideoTagCreateData
+}
+
+type TagCreate struct {
+	Data   TagCreateData
+	Select TagSelect
+}
+
+type TagCreateMany struct {
+	Data []TagCreateData
+}
+
+func CreateOneTag[T TagModel](ctx context.Context, db bom.Querier, q TagCreate) (*T, error) {
+	d := dialectsqlite.New()
+	data := q.Data
+	if err := createTagRecord(ctx, db, d, &data); err != nil {
+		return nil, err
+	}
+	if err := createTagRelations(ctx, db, d, &data); err != nil {
+		return nil, err
+	}
+	var fetch func(context.Context, TagSelect) (*T, error)
+	if fetch == nil {
+		if data.Id.IsSome() {
+			lookup := TagUK_Id{
+				Id: data.Id.Value(),
+			}
+			fetch = func(ctx context.Context, sel TagSelect) (*T, error) {
+				return FindUniqueTag[T](ctx, db, TagFindUnique[TagUK_Id]{
+					Where:  lookup,
+					Select: sel,
+				})
+			}
+		}
+	}
+	if fetch == nil {
+		if data.Name.IsSome() {
+			lookup := TagUK_Name{
+				Name: data.Name.Value(),
+			}
+			fetch = func(ctx context.Context, sel TagSelect) (*T, error) {
+				return FindUniqueTag[T](ctx, db, TagFindUnique[TagUK_Name]{
+					Where:  lookup,
+					Select: sel,
+				})
+			}
+		}
+	}
+	if fetch == nil {
+		return nil, fmt.Errorf("TagCreate requires values for a unique constraint")
+	}
+	return fetch(ctx, q.Select)
+}
+
+func CreateManyTag(ctx context.Context, db bom.Querier, q TagCreateMany) (int64, error) {
+	d := dialectsqlite.New()
+	if len(q.Data) == 0 {
+		return 0, nil
+	}
+	var total int64
+	for i := range q.Data {
+		data := q.Data[i]
+		if err := createTagRecord(ctx, db, d, &data); err != nil {
+			return total, err
+		}
+		if err := createTagRelations(ctx, db, d, &data); err != nil {
+			return total, err
+		}
+		total++
+	}
+	return total, nil
+}
+
+func createTagRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, data *TagCreateData) error {
+	state := newArgState(d)
+	var columns []string
+	var placeholders []string
+	if identityGenerator == nil {
+		identityGenerator = &bom.DefaultIdentityGenerator{}
+	}
+	var wantsAutoId bool
+	var wantsAutoName bool
+	if data.Id.IsSome() {
+		val := data.Id.Value()
+		columns = append(columns, d.QuoteIdent("id"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+		wantsAutoId = true
+	}
+	if data.Name.IsSome() {
+		val := data.Name.Value()
+		columns = append(columns, d.QuoteIdent("name"))
+		placeholders = append(placeholders, state.Add(val))
+	} else {
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return err
+	}
+	sqlStr := buildInsertSQL(d, "tag", columns, placeholders)
+	autoCount := 0
+	if wantsAutoId {
+		autoCount++
+	}
+	if wantsAutoName {
+		autoCount++
+	}
+	var returning bool
+	if d.Cap().InsertReturning && autoCount > 0 {
+		returning = true
+		var returningCols []string
+		if wantsAutoId {
+			returningCols = append(returningCols, d.QuoteIdent("id"))
+		}
+		if wantsAutoName {
+			returningCols = append(returningCols, d.QuoteIdent("name"))
+		}
+		if len(returningCols) > 0 {
+			sqlStr = sqlStr + " RETURNING " + strings.Join(returningCols, ", ")
+		}
+	}
+	if returning {
+		rows, err := db.QueryContext(ctx, sqlStr, state.Args()...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		var scanTargets []any
+		var retId uint64
+		if wantsAutoId {
+			scanTargets = append(scanTargets, &retId)
+		}
+		var retName string
+		if wantsAutoName {
+			scanTargets = append(scanTargets, &retName)
+		}
+		if !rows.Next() {
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			return fmt.Errorf("Tag insert returned no rows")
+		}
+		if err := rows.Scan(scanTargets...); err != nil {
+			return err
+		}
+		if wantsAutoId {
+			data.Id = opt.OVal(retId)
+		}
+		if wantsAutoName {
+			data.Name = opt.OVal(retName)
+		}
+		return nil
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return err
+	}
+	if autoCount == 1 {
+		id, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		if wantsAutoId {
+			data.Id = opt.OVal(uint64(id))
+		}
+		if wantsAutoName {
+			data.Name = opt.OVal(strconv.FormatInt(id, 10))
+		}
+	} else if autoCount > 1 {
+		return fmt.Errorf("%s cannot populate multiple auto columns for tag without RETURNING", d.Name())
+	}
+	return nil
+}
+
+func createTagRelations(ctx context.Context, db bom.Querier, d dialect.Dialect, data *TagCreateData) error {
+	if len(data.VideoTag) > 0 {
+		for i := range data.VideoTag {
+			child := &data.VideoTag[i]
+			if !child.TagId.IsSome() {
+				if !data.Id.IsSome() {
+					return fmt.Errorf("Tag: missing id for relation VideoTag")
+				}
+				child.TagId = data.Id
+			}
+			if err := createVideoTagRecord(ctx, db, d, child); err != nil {
+				return err
+			}
+			if err := createVideoTagRelations(ctx, db, d, child); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+type VideoTagCreateData struct {
+	VideoId opt.Opt[uint64]
+	TagId   opt.Opt[uint64]
+}
+
+type VideoTagCreate struct {
+	Data   VideoTagCreateData
+	Select VideoTagSelect
+}
+
+type VideoTagCreateMany struct {
+	Data []VideoTagCreateData
+}
+
 func CreateOneVideoTag[T VideoTagModel](ctx context.Context, db bom.Querier, q VideoTagCreate) (*T, error) {
 	d := dialectsqlite.New()
 	data := q.Data
@@ -5171,65 +5242,6 @@ func createVideoTagRecord(ctx context.Context, db bom.Querier, d dialect.Dialect
 
 func createVideoTagRelations(ctx context.Context, db bom.Querier, d dialect.Dialect, data *VideoTagCreateData) error {
 	return nil
-}
-
-func queryVideoTagRows[T VideoTagModel](ctx context.Context, db bom.Querier, d dialect.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
-	sqlStr, args, err := planner.BuildFindMany(d, input)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := db.QueryContext(ctx, sqlStr, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var result []T
-	if expectArray {
-		if rows.Next() {
-			var raw []byte
-			if err := rows.Scan(&raw); err != nil {
-				return nil, err
-			}
-			if len(raw) == 0 {
-				raw = []byte("[]")
-			}
-			var payload []json.RawMessage
-			if err := json.Unmarshal(raw, &payload); err != nil {
-				return nil, err
-			}
-			for _, item := range payload {
-				item = normalizeJSONRaw(item)
-				var rec VideoTag
-				if err := json.Unmarshal(item, &rec); err != nil {
-					return nil, err
-				}
-				result = append(result, T(rec))
-			}
-		}
-		if err := rows.Err(); err != nil {
-			return nil, err
-		}
-		return result, nil
-	}
-	for rows.Next() {
-		var raw []byte
-		if err := rows.Scan(&raw); err != nil {
-			return nil, err
-		}
-		if len(raw) == 0 {
-			raw = []byte("{}")
-		}
-		raw = normalizeJSONRaw(raw)
-		var rec VideoTag
-		if err := json.Unmarshal(raw, &rec); err != nil {
-			return nil, err
-		}
-		result = append(result, T(rec))
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return result, nil
 }
 
 type AuthorUnique interface {
@@ -5676,4 +5688,1051 @@ func FindUniqueVideoTag[T VideoTagModel, U VideoTagUnique](ctx context.Context, 
 	}
 	out := rows[0]
 	return &out, nil
+}
+
+type AuthorUpdateData struct {
+	Id        opt.Opt[uint64]
+	Name      opt.Opt[string]
+	Email     opt.Opt[string]
+	CreatedAt opt.Opt[string]
+}
+
+func buildAuthorUpdateSet(d dialect.Dialect, state *argState, data *AuthorUpdateData) (string, int) {
+	if data == nil {
+		return "", 0
+	}
+	var parts []string
+	if data.Id.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("id"), state.Add(data.Id.Value())))
+	}
+	if data.Name.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("name"), state.Add(data.Name.Value())))
+	}
+	if data.Email.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("email"), state.Add(data.Email.Value())))
+	}
+	if data.CreatedAt.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("created_at"), state.Add(data.CreatedAt.Value())))
+	}
+	return strings.Join(parts, ", "), len(parts)
+}
+
+type AuthorUpdate[U AuthorUnique] struct {
+	Where  U
+	Data   AuthorUpdateData
+	Select AuthorSelect
+}
+
+func UpdateOneAuthor[T AuthorModel, U AuthorUnique](ctx context.Context, db bom.Querier, q AuthorUpdate[U]) (*T, error) {
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	setSQL, count := buildAuthorUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return nil, fmt.Errorf("AuthorUpdate requires at least one field to update")
+	}
+	alias := "t0"
+	whereClause, err := buildAuthorUniquePredicate(d, alias, state, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("author"), setSQL, whereClause)
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	updatedWhere, err := buildAuthorPostUpdateSelector(&q.Data, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	return FindUniqueAuthor[T, U](ctx, db, AuthorFindUnique[U]{
+		Where:  updatedWhere,
+		Select: q.Select,
+	})
+}
+
+func buildAuthorPostUpdateSelector[U AuthorUnique](data *AuthorUpdateData, where U) (U, error) {
+	switch v := any(where).(type) {
+	case AuthorUK_Id:
+		sel := v
+		if data != nil && data.Id.IsSome() {
+			sel.Id = data.Id.Value()
+		}
+		return any(sel).(U), nil
+	case AuthorUK_Email:
+		sel := v
+		if data != nil && data.Email.IsSome() {
+			sel.Email = data.Email.Value()
+		}
+		return any(sel).(U), nil
+	default:
+		return where, fmt.Errorf("unsupported unique type %T", where)
+	}
+}
+
+type AuthorUpdateMany struct {
+	Where *AuthorWhereInput
+	Data  AuthorUpdateData
+}
+
+func UpdateManyAuthor(ctx context.Context, db bom.Querier, q AuthorUpdateMany) (int64, error) {
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	setSQL, count := buildAuthorUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return 0, fmt.Errorf("AuthorUpdateMany requires at least one field to update")
+	}
+	whereClause := buildAuthorWhere(d, "t0", state, q.Where)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return 0, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("author"), setSQL)
+	if whereClause != "" {
+		sqlStr += " WHERE " + whereClause
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+type AuthorProfileUpdateData struct {
+	Id        opt.Opt[uint64]
+	AuthorId  opt.Opt[uint64]
+	Bio       opt.Opt[string]
+	AvatarUrl opt.Opt[string]
+	CreatedAt opt.Opt[string]
+}
+
+func buildAuthorProfileUpdateSet(d dialect.Dialect, state *argState, data *AuthorProfileUpdateData) (string, int) {
+	if data == nil {
+		return "", 0
+	}
+	var parts []string
+	if data.Id.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("id"), state.Add(data.Id.Value())))
+	}
+	if data.AuthorId.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("author_id"), state.Add(data.AuthorId.Value())))
+	}
+	if data.Bio.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("bio"), state.Add(data.Bio.Value())))
+	}
+	if data.AvatarUrl.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("avatar_url"), state.Add(data.AvatarUrl.Value())))
+	}
+	if data.CreatedAt.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("created_at"), state.Add(data.CreatedAt.Value())))
+	}
+	return strings.Join(parts, ", "), len(parts)
+}
+
+type AuthorProfileUpdate[U AuthorProfileUnique] struct {
+	Where  U
+	Data   AuthorProfileUpdateData
+	Select AuthorProfileSelect
+}
+
+func UpdateOneAuthorProfile[T AuthorProfileModel, U AuthorProfileUnique](ctx context.Context, db bom.Querier, q AuthorProfileUpdate[U]) (*T, error) {
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	setSQL, count := buildAuthorProfileUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return nil, fmt.Errorf("AuthorProfileUpdate requires at least one field to update")
+	}
+	alias := "t0"
+	whereClause, err := buildAuthorProfileUniquePredicate(d, alias, state, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("author_profile"), setSQL, whereClause)
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	updatedWhere, err := buildAuthorProfilePostUpdateSelector(&q.Data, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	return FindUniqueAuthorProfile[T, U](ctx, db, AuthorProfileFindUnique[U]{
+		Where:  updatedWhere,
+		Select: q.Select,
+	})
+}
+
+func buildAuthorProfilePostUpdateSelector[U AuthorProfileUnique](data *AuthorProfileUpdateData, where U) (U, error) {
+	switch v := any(where).(type) {
+	case AuthorProfileUK_Id:
+		sel := v
+		if data != nil && data.Id.IsSome() {
+			sel.Id = data.Id.Value()
+		}
+		return any(sel).(U), nil
+	case AuthorProfileUK_AuthorId:
+		sel := v
+		if data != nil && data.AuthorId.IsSome() {
+			sel.AuthorId = data.AuthorId.Value()
+		}
+		return any(sel).(U), nil
+	default:
+		return where, fmt.Errorf("unsupported unique type %T", where)
+	}
+}
+
+type AuthorProfileUpdateMany struct {
+	Where *AuthorProfileWhereInput
+	Data  AuthorProfileUpdateData
+}
+
+func UpdateManyAuthorProfile(ctx context.Context, db bom.Querier, q AuthorProfileUpdateMany) (int64, error) {
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	setSQL, count := buildAuthorProfileUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return 0, fmt.Errorf("AuthorProfileUpdateMany requires at least one field to update")
+	}
+	whereClause := buildAuthorProfileWhere(d, "t0", state, q.Where)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return 0, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("author_profile"), setSQL)
+	if whereClause != "" {
+		sqlStr += " WHERE " + whereClause
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+type VideoUpdateData struct {
+	Id          opt.Opt[uint64]
+	Title       opt.Opt[string]
+	Slug        opt.Opt[string]
+	AuthorId    opt.Opt[uint64]
+	Description opt.Opt[string]
+	CreatedAt   opt.Opt[string]
+}
+
+func buildVideoUpdateSet(d dialect.Dialect, state *argState, data *VideoUpdateData) (string, int) {
+	if data == nil {
+		return "", 0
+	}
+	var parts []string
+	if data.Id.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("id"), state.Add(data.Id.Value())))
+	}
+	if data.Title.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("title"), state.Add(data.Title.Value())))
+	}
+	if data.Slug.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("slug"), state.Add(data.Slug.Value())))
+	}
+	if data.AuthorId.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("author_id"), state.Add(data.AuthorId.Value())))
+	}
+	if data.Description.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("description"), state.Add(data.Description.Value())))
+	}
+	if data.CreatedAt.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("created_at"), state.Add(data.CreatedAt.Value())))
+	}
+	return strings.Join(parts, ", "), len(parts)
+}
+
+type VideoUpdate[U VideoUnique] struct {
+	Where  U
+	Data   VideoUpdateData
+	Select VideoSelect
+}
+
+func UpdateOneVideo[T VideoModel, U VideoUnique](ctx context.Context, db bom.Querier, q VideoUpdate[U]) (*T, error) {
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	setSQL, count := buildVideoUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return nil, fmt.Errorf("VideoUpdate requires at least one field to update")
+	}
+	alias := "t0"
+	whereClause, err := buildVideoUniquePredicate(d, alias, state, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("video"), setSQL, whereClause)
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	updatedWhere, err := buildVideoPostUpdateSelector(&q.Data, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	return FindUniqueVideo[T, U](ctx, db, VideoFindUnique[U]{
+		Where:  updatedWhere,
+		Select: q.Select,
+	})
+}
+
+func buildVideoPostUpdateSelector[U VideoUnique](data *VideoUpdateData, where U) (U, error) {
+	switch v := any(where).(type) {
+	case VideoUK_Id:
+		sel := v
+		if data != nil && data.Id.IsSome() {
+			sel.Id = data.Id.Value()
+		}
+		return any(sel).(U), nil
+	case VideoUK_Slug:
+		sel := v
+		if data != nil && data.Slug.IsSome() {
+			sel.Slug = data.Slug.Value()
+		}
+		return any(sel).(U), nil
+	default:
+		return where, fmt.Errorf("unsupported unique type %T", where)
+	}
+}
+
+type VideoUpdateMany struct {
+	Where *VideoWhereInput
+	Data  VideoUpdateData
+}
+
+func UpdateManyVideo(ctx context.Context, db bom.Querier, q VideoUpdateMany) (int64, error) {
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	setSQL, count := buildVideoUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return 0, fmt.Errorf("VideoUpdateMany requires at least one field to update")
+	}
+	whereClause := buildVideoWhere(d, "t0", state, q.Where)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return 0, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("video"), setSQL)
+	if whereClause != "" {
+		sqlStr += " WHERE " + whereClause
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+type CommentUpdateData struct {
+	Id        opt.Opt[uint64]
+	VideoId   opt.Opt[uint64]
+	AuthorId  opt.Opt[uint64]
+	Body      opt.Opt[string]
+	CreatedAt opt.Opt[string]
+}
+
+func buildCommentUpdateSet(d dialect.Dialect, state *argState, data *CommentUpdateData) (string, int) {
+	if data == nil {
+		return "", 0
+	}
+	var parts []string
+	if data.Id.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("id"), state.Add(data.Id.Value())))
+	}
+	if data.VideoId.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("video_id"), state.Add(data.VideoId.Value())))
+	}
+	if data.AuthorId.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("author_id"), state.Add(data.AuthorId.Value())))
+	}
+	if data.Body.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("body"), state.Add(data.Body.Value())))
+	}
+	if data.CreatedAt.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("created_at"), state.Add(data.CreatedAt.Value())))
+	}
+	return strings.Join(parts, ", "), len(parts)
+}
+
+type CommentUpdate[U CommentUnique] struct {
+	Where  U
+	Data   CommentUpdateData
+	Select CommentSelect
+}
+
+func UpdateOneComment[T CommentModel, U CommentUnique](ctx context.Context, db bom.Querier, q CommentUpdate[U]) (*T, error) {
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	setSQL, count := buildCommentUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return nil, fmt.Errorf("CommentUpdate requires at least one field to update")
+	}
+	alias := "t0"
+	whereClause, err := buildCommentUniquePredicate(d, alias, state, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("comment"), setSQL, whereClause)
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	updatedWhere, err := buildCommentPostUpdateSelector(&q.Data, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	return FindUniqueComment[T, U](ctx, db, CommentFindUnique[U]{
+		Where:  updatedWhere,
+		Select: q.Select,
+	})
+}
+
+func buildCommentPostUpdateSelector[U CommentUnique](data *CommentUpdateData, where U) (U, error) {
+	switch v := any(where).(type) {
+	case CommentUK_Id:
+		sel := v
+		if data != nil && data.Id.IsSome() {
+			sel.Id = data.Id.Value()
+		}
+		return any(sel).(U), nil
+	default:
+		return where, fmt.Errorf("unsupported unique type %T", where)
+	}
+}
+
+type CommentUpdateMany struct {
+	Where *CommentWhereInput
+	Data  CommentUpdateData
+}
+
+func UpdateManyComment(ctx context.Context, db bom.Querier, q CommentUpdateMany) (int64, error) {
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	setSQL, count := buildCommentUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return 0, fmt.Errorf("CommentUpdateMany requires at least one field to update")
+	}
+	whereClause := buildCommentWhere(d, "t0", state, q.Where)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return 0, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("comment"), setSQL)
+	if whereClause != "" {
+		sqlStr += " WHERE " + whereClause
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+type TagUpdateData struct {
+	Id   opt.Opt[uint64]
+	Name opt.Opt[string]
+}
+
+func buildTagUpdateSet(d dialect.Dialect, state *argState, data *TagUpdateData) (string, int) {
+	if data == nil {
+		return "", 0
+	}
+	var parts []string
+	if data.Id.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("id"), state.Add(data.Id.Value())))
+	}
+	if data.Name.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("name"), state.Add(data.Name.Value())))
+	}
+	return strings.Join(parts, ", "), len(parts)
+}
+
+type TagUpdate[U TagUnique] struct {
+	Where  U
+	Data   TagUpdateData
+	Select TagSelect
+}
+
+func UpdateOneTag[T TagModel, U TagUnique](ctx context.Context, db bom.Querier, q TagUpdate[U]) (*T, error) {
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	setSQL, count := buildTagUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return nil, fmt.Errorf("TagUpdate requires at least one field to update")
+	}
+	alias := "t0"
+	whereClause, err := buildTagUniquePredicate(d, alias, state, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("tag"), setSQL, whereClause)
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	updatedWhere, err := buildTagPostUpdateSelector(&q.Data, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	return FindUniqueTag[T, U](ctx, db, TagFindUnique[U]{
+		Where:  updatedWhere,
+		Select: q.Select,
+	})
+}
+
+func buildTagPostUpdateSelector[U TagUnique](data *TagUpdateData, where U) (U, error) {
+	switch v := any(where).(type) {
+	case TagUK_Id:
+		sel := v
+		if data != nil && data.Id.IsSome() {
+			sel.Id = data.Id.Value()
+		}
+		return any(sel).(U), nil
+	case TagUK_Name:
+		sel := v
+		if data != nil && data.Name.IsSome() {
+			sel.Name = data.Name.Value()
+		}
+		return any(sel).(U), nil
+	default:
+		return where, fmt.Errorf("unsupported unique type %T", where)
+	}
+}
+
+type TagUpdateMany struct {
+	Where *TagWhereInput
+	Data  TagUpdateData
+}
+
+func UpdateManyTag(ctx context.Context, db bom.Querier, q TagUpdateMany) (int64, error) {
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	setSQL, count := buildTagUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return 0, fmt.Errorf("TagUpdateMany requires at least one field to update")
+	}
+	whereClause := buildTagWhere(d, "t0", state, q.Where)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return 0, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("tag"), setSQL)
+	if whereClause != "" {
+		sqlStr += " WHERE " + whereClause
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+type VideoTagUpdateData struct {
+	VideoId opt.Opt[uint64]
+	TagId   opt.Opt[uint64]
+}
+
+func buildVideoTagUpdateSet(d dialect.Dialect, state *argState, data *VideoTagUpdateData) (string, int) {
+	if data == nil {
+		return "", 0
+	}
+	var parts []string
+	if data.VideoId.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("video_id"), state.Add(data.VideoId.Value())))
+	}
+	if data.TagId.IsSome() {
+		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("tag_id"), state.Add(data.TagId.Value())))
+	}
+	return strings.Join(parts, ", "), len(parts)
+}
+
+type VideoTagUpdate[U VideoTagUnique] struct {
+	Where  U
+	Data   VideoTagUpdateData
+	Select VideoTagSelect
+}
+
+func UpdateOneVideoTag[T VideoTagModel, U VideoTagUnique](ctx context.Context, db bom.Querier, q VideoTagUpdate[U]) (*T, error) {
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	setSQL, count := buildVideoTagUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return nil, fmt.Errorf("VideoTagUpdate requires at least one field to update")
+	}
+	alias := "t0"
+	whereClause, err := buildVideoTagUniquePredicate(d, alias, state, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("video_tag"), setSQL, whereClause)
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	updatedWhere, err := buildVideoTagPostUpdateSelector(&q.Data, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	return FindUniqueVideoTag[T, U](ctx, db, VideoTagFindUnique[U]{
+		Where:  updatedWhere,
+		Select: q.Select,
+	})
+}
+
+func buildVideoTagPostUpdateSelector[U VideoTagUnique](data *VideoTagUpdateData, where U) (U, error) {
+	switch v := any(where).(type) {
+	case VideoTagUK_VideoIdTagId:
+		sel := v
+		if data != nil && data.VideoId.IsSome() {
+			sel.VideoId = data.VideoId.Value()
+		}
+		if data != nil && data.TagId.IsSome() {
+			sel.TagId = data.TagId.Value()
+		}
+		return any(sel).(U), nil
+	default:
+		return where, fmt.Errorf("unsupported unique type %T", where)
+	}
+}
+
+type VideoTagUpdateMany struct {
+	Where *VideoTagWhereInput
+	Data  VideoTagUpdateData
+}
+
+func UpdateManyVideoTag(ctx context.Context, db bom.Querier, q VideoTagUpdateMany) (int64, error) {
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	setSQL, count := buildVideoTagUpdateSet(d, state, &q.Data)
+	if count == 0 {
+		return 0, fmt.Errorf("VideoTagUpdateMany requires at least one field to update")
+	}
+	whereClause := buildVideoTagWhere(d, "t0", state, q.Where)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return 0, err
+	}
+	sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("video_tag"), setSQL)
+	if whereClause != "" {
+		sqlStr += " WHERE " + whereClause
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+type AuthorDelete[U AuthorUnique] struct {
+	Where  U
+	Select AuthorSelect
+}
+
+func DeleteOneAuthor[T AuthorModel, U AuthorUnique](ctx context.Context, db bom.Querier, q AuthorDelete[U]) (*T, error) {
+	existing, err := FindUniqueAuthor[T, U](ctx, db, AuthorFindUnique[U]{
+		Where:  q.Where,
+		Select: q.Select,
+	})
+	if err != nil {
+		return nil, err
+	}
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	alias := "t0"
+	whereClause, err := buildAuthorUniquePredicate(d, alias, state, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s", d.QuoteIdent("author"), whereClause)
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return existing, nil
+}
+
+type AuthorDeleteMany struct {
+	Where *AuthorWhereInput
+}
+
+func DeleteManyAuthor(ctx context.Context, db bom.Querier, q AuthorDeleteMany) (int64, error) {
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	whereClause := buildAuthorWhere(d, "t0", state, q.Where)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return 0, err
+	}
+	sqlStr := fmt.Sprintf("DELETE FROM %s", d.QuoteIdent("author"))
+	if whereClause != "" {
+		sqlStr += " WHERE " + whereClause
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+type AuthorProfileDelete[U AuthorProfileUnique] struct {
+	Where  U
+	Select AuthorProfileSelect
+}
+
+func DeleteOneAuthorProfile[T AuthorProfileModel, U AuthorProfileUnique](ctx context.Context, db bom.Querier, q AuthorProfileDelete[U]) (*T, error) {
+	existing, err := FindUniqueAuthorProfile[T, U](ctx, db, AuthorProfileFindUnique[U]{
+		Where:  q.Where,
+		Select: q.Select,
+	})
+	if err != nil {
+		return nil, err
+	}
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	alias := "t0"
+	whereClause, err := buildAuthorProfileUniquePredicate(d, alias, state, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s", d.QuoteIdent("author_profile"), whereClause)
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return existing, nil
+}
+
+type AuthorProfileDeleteMany struct {
+	Where *AuthorProfileWhereInput
+}
+
+func DeleteManyAuthorProfile(ctx context.Context, db bom.Querier, q AuthorProfileDeleteMany) (int64, error) {
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	whereClause := buildAuthorProfileWhere(d, "t0", state, q.Where)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return 0, err
+	}
+	sqlStr := fmt.Sprintf("DELETE FROM %s", d.QuoteIdent("author_profile"))
+	if whereClause != "" {
+		sqlStr += " WHERE " + whereClause
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+type VideoDelete[U VideoUnique] struct {
+	Where  U
+	Select VideoSelect
+}
+
+func DeleteOneVideo[T VideoModel, U VideoUnique](ctx context.Context, db bom.Querier, q VideoDelete[U]) (*T, error) {
+	existing, err := FindUniqueVideo[T, U](ctx, db, VideoFindUnique[U]{
+		Where:  q.Where,
+		Select: q.Select,
+	})
+	if err != nil {
+		return nil, err
+	}
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	alias := "t0"
+	whereClause, err := buildVideoUniquePredicate(d, alias, state, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s", d.QuoteIdent("video"), whereClause)
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return existing, nil
+}
+
+type VideoDeleteMany struct {
+	Where *VideoWhereInput
+}
+
+func DeleteManyVideo(ctx context.Context, db bom.Querier, q VideoDeleteMany) (int64, error) {
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	whereClause := buildVideoWhere(d, "t0", state, q.Where)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return 0, err
+	}
+	sqlStr := fmt.Sprintf("DELETE FROM %s", d.QuoteIdent("video"))
+	if whereClause != "" {
+		sqlStr += " WHERE " + whereClause
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+type CommentDelete[U CommentUnique] struct {
+	Where  U
+	Select CommentSelect
+}
+
+func DeleteOneComment[T CommentModel, U CommentUnique](ctx context.Context, db bom.Querier, q CommentDelete[U]) (*T, error) {
+	existing, err := FindUniqueComment[T, U](ctx, db, CommentFindUnique[U]{
+		Where:  q.Where,
+		Select: q.Select,
+	})
+	if err != nil {
+		return nil, err
+	}
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	alias := "t0"
+	whereClause, err := buildCommentUniquePredicate(d, alias, state, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s", d.QuoteIdent("comment"), whereClause)
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return existing, nil
+}
+
+type CommentDeleteMany struct {
+	Where *CommentWhereInput
+}
+
+func DeleteManyComment(ctx context.Context, db bom.Querier, q CommentDeleteMany) (int64, error) {
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	whereClause := buildCommentWhere(d, "t0", state, q.Where)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return 0, err
+	}
+	sqlStr := fmt.Sprintf("DELETE FROM %s", d.QuoteIdent("comment"))
+	if whereClause != "" {
+		sqlStr += " WHERE " + whereClause
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+type TagDelete[U TagUnique] struct {
+	Where  U
+	Select TagSelect
+}
+
+func DeleteOneTag[T TagModel, U TagUnique](ctx context.Context, db bom.Querier, q TagDelete[U]) (*T, error) {
+	existing, err := FindUniqueTag[T, U](ctx, db, TagFindUnique[U]{
+		Where:  q.Where,
+		Select: q.Select,
+	})
+	if err != nil {
+		return nil, err
+	}
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	alias := "t0"
+	whereClause, err := buildTagUniquePredicate(d, alias, state, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s", d.QuoteIdent("tag"), whereClause)
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return existing, nil
+}
+
+type TagDeleteMany struct {
+	Where *TagWhereInput
+}
+
+func DeleteManyTag(ctx context.Context, db bom.Querier, q TagDeleteMany) (int64, error) {
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	whereClause := buildTagWhere(d, "t0", state, q.Where)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return 0, err
+	}
+	sqlStr := fmt.Sprintf("DELETE FROM %s", d.QuoteIdent("tag"))
+	if whereClause != "" {
+		sqlStr += " WHERE " + whereClause
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+type VideoTagDelete[U VideoTagUnique] struct {
+	Where  U
+	Select VideoTagSelect
+}
+
+func DeleteOneVideoTag[T VideoTagModel, U VideoTagUnique](ctx context.Context, db bom.Querier, q VideoTagDelete[U]) (*T, error) {
+	existing, err := FindUniqueVideoTag[T, U](ctx, db, VideoTagFindUnique[U]{
+		Where:  q.Where,
+		Select: q.Select,
+	})
+	if err != nil {
+		return nil, err
+	}
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	alias := "t0"
+	whereClause, err := buildVideoTagUniquePredicate(d, alias, state, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s", d.QuoteIdent("video_tag"), whereClause)
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return existing, nil
+}
+
+type VideoTagDeleteMany struct {
+	Where *VideoTagWhereInput
+}
+
+func DeleteManyVideoTag(ctx context.Context, db bom.Querier, q VideoTagDeleteMany) (int64, error) {
+	d := dialectsqlite.New()
+	state := newArgState(d)
+	whereClause := buildVideoTagWhere(d, "t0", state, q.Where)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return 0, err
+	}
+	sqlStr := fmt.Sprintf("DELETE FROM %s", d.QuoteIdent("video_tag"))
+	if whereClause != "" {
+		sqlStr += " WHERE " + whereClause
+	}
+	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
