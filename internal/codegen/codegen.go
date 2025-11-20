@@ -2,7 +2,7 @@ package codegen
 
 import (
 	"bytes"
-	_ "embed"
+	"embed"
 	"fmt"
 	"go/format"
 	"os"
@@ -14,11 +14,8 @@ import (
 	"bom/internal/schema"
 )
 
-//go:embed templates/findmany.tmpl
-var findManyTemplate string
-
-//go:embed templates/findunique.tmpl
-var findUniqueTemplate string
+//go:embed templates/*.tmpl
+var templatesFS embed.FS
 
 // Generator produces Go code for the resolved schema.
 type Generator struct {
@@ -32,9 +29,8 @@ func New() *Generator {
 		"lowerFirst": lowerFirst,
 		"castInt64":  func(goType, value string) string { return castInt64(goType, value) },
 	}
-	combined := findManyTemplate + "\n" + findUniqueTemplate
 	return &Generator{
-		tmpl: template.Must(template.New("bom").Funcs(funcs).Parse(combined)),
+		tmpl: template.Must(template.New("root").Funcs(funcs).ParseFS(templatesFS, "templates/*.tmpl")),
 	}
 }
 
@@ -65,7 +61,7 @@ func (g *Generator) Generate(ir schema.IR, outDir string, dialectName string) er
 	}
 
 	var buf bytes.Buffer
-	if err := g.tmpl.Execute(&buf, data); err != nil {
+	if err := g.tmpl.ExecuteTemplate(&buf, "root", data); err != nil {
 		return err
 	}
 	src, err := format.Source(buf.Bytes())
@@ -86,10 +82,10 @@ type tableData struct {
 }
 
 type columnData struct {
-	Name     string
-	Camel    string
-	GoType   string
-	Nullable bool
+	Name          string
+	Camel         string
+	GoType        string
+	Nullable      bool
 	AutoIncrement bool
 	Identity      string
 }
@@ -188,10 +184,10 @@ func buildTables(ir schema.IR) []tableData {
 		}
 		for _, col := range tbl.Columns {
 			td.Columns = append(td.Columns, columnData{
-				Name:     col.Name,
-				Camel:    toCamel(col.Name),
-				GoType:   col.GoType,
-				Nullable: col.Nullable,
+				Name:          col.Name,
+				Camel:         toCamel(col.Name),
+				GoType:        col.GoType,
+				Nullable:      col.Nullable,
 				AutoIncrement: col.AutoIncrement,
 				Identity:      col.Identity,
 			})
@@ -199,9 +195,9 @@ func buildTables(ir schema.IR) []tableData {
 		for _, pk := range tbl.PrimaryKey {
 			if col := findColumn(tbl.Columns, pk); col != nil {
 				td.PrimaryKey = append(td.PrimaryKey, columnData{
-					Name:   col.Name,
-					Camel:  toCamel(col.Name),
-					GoType: col.GoType,
+					Name:          col.Name,
+					Camel:         toCamel(col.Name),
+					GoType:        col.GoType,
 					AutoIncrement: col.AutoIncrement,
 					Identity:      col.Identity,
 				})

@@ -1,0 +1,115 @@
+{{ define "update" }}
+{{ range .Tables }}
+{{- $model := .ModelName }}
+{{- $table := .TableName }}
+
+type {{ .ModelName }}UpdateData struct {
+  {{- range .Columns }}
+  {{ .Camel }} opt.Opt[{{ .GoType }}]
+  {{- end }}
+}
+
+func build{{ .ModelName }}UpdateSet(d dialect.Dialect, state *argState, data *{{ .ModelName }}UpdateData) (string, int) {
+  if data == nil {
+    return "", 0
+  }
+  var parts []string
+  {{- range .Columns }}
+  if data.{{ .Camel }}.IsSome() {
+    parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("{{ .Name }}"), state.Add(data.{{ .Camel }}.Value())))
+  }
+  {{- end }}
+  return strings.Join(parts, ", "), len(parts)
+}
+
+{{- if .UniqueConstraints }}
+type {{ .ModelName }}Update[U {{ .ModelName }}Unique] struct {
+  Where  U
+  Data   {{ .ModelName }}UpdateData
+  Select {{ .ModelName }}Select
+}
+
+func UpdateOne{{ .ModelName }}[T {{ .ModelName }}Model, U {{ .ModelName }}Unique](ctx context.Context, db bom.Querier, q {{ .ModelName }}Update[U]) (*T, error) {
+  d := {{ $.DialectInit }}
+  state := newArgState(d)
+  setSQL, count := build{{ .ModelName }}UpdateSet(d, state, &q.Data)
+  if count == 0 {
+    return nil, fmt.Errorf("{{ .ModelName }}Update requires at least one field to update")
+  }
+  alias := "t0"
+  whereClause, err := build{{ .ModelName }}UniquePredicate(d, alias, state, q.Where)
+  if err != nil {
+    return nil, err
+  }
+  if err := ensureParamLimit(d, len(state.Args())); err != nil {
+    return nil, err
+  }
+  sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("{{ .TableName }}"), setSQL, whereClause)
+  res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+  if err != nil {
+    return nil, err
+  }
+  affected, err := res.RowsAffected()
+  if err != nil {
+    return nil, err
+  }
+  if affected == 0 {
+    return nil, sql.ErrNoRows
+  }
+  updatedWhere, err := build{{ .ModelName }}PostUpdateSelector(&q.Data, q.Where)
+  if err != nil {
+    return nil, err
+  }
+  return FindUnique{{ .ModelName }}[T, U](ctx, db, {{ .ModelName }}FindUnique[U]{
+    Where:  updatedWhere,
+    Select: q.Select,
+  })
+}
+
+func build{{ .ModelName }}PostUpdateSelector[U {{ .ModelName }}Unique](data *{{ .ModelName }}UpdateData, where U) (U, error) {
+  switch v := any(where).(type) {
+  {{- range .UniqueConstraints }}
+  case {{ .TypeName }}:
+    sel := v
+    {{- range .Fields }}
+    if data != nil && data.{{ .Camel }}.IsSome() {
+      sel.{{ .Camel }} = data.{{ .Camel }}.Value()
+    }
+    {{- end }}
+    return any(sel).(U), nil
+  {{- end }}
+  default:
+    return where, fmt.Errorf("unsupported unique type %T", where)
+  }
+}
+{{- end }}
+
+type {{ .ModelName }}UpdateMany struct {
+  Where *{{ .ModelName }}WhereInput
+  Data  {{ .ModelName }}UpdateData
+}
+
+func UpdateMany{{ .ModelName }}(ctx context.Context, db bom.Querier, q {{ .ModelName }}UpdateMany) (int64, error) {
+  d := {{ $.DialectInit }}
+  state := newArgState(d)
+  setSQL, count := build{{ .ModelName }}UpdateSet(d, state, &q.Data)
+  if count == 0 {
+    return 0, fmt.Errorf("{{ .ModelName }}UpdateMany requires at least one field to update")
+  }
+  whereClause := build{{ .ModelName }}Where(d, "t0", state, q.Where)
+  if err := ensureParamLimit(d, len(state.Args())); err != nil {
+    return 0, err
+  }
+  sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("{{ .TableName }}"), setSQL)
+  if whereClause != "" {
+    sqlStr += " WHERE " + whereClause
+  }
+  res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+  if err != nil {
+    return 0, err
+  }
+  return res.RowsAffected()
+}
+
+{{ end }}
+{{ end }}
