@@ -1,3 +1,4 @@
+{{ define "findunique" }}
 {{ range .Tables }}
 {{- if .UniqueConstraints }}
 type {{ .ModelName }}Unique interface {
@@ -77,4 +78,5 @@ func FindUnique{{ .ModelName }}[T {{ .ModelName }}Model, U {{ .ModelName }}Uniqu
 }
 
 {{- end }}
+{{ end }}
 {{ end }}
