@@ -1,0 +1,66 @@
+{{ define "delete" }}
+{{ range .Tables }}
+{{- if .UniqueConstraints }}
+type {{ .ModelName }}Delete[U {{ .ModelName }}Unique] struct {
+  Where  U
+  Select {{ .ModelName }}Select
+}
+
+func DeleteOne{{ .ModelName }}[T {{ .ModelName }}Model, U {{ .ModelName }}Unique](ctx context.Context, db bom.Querier, q {{ .ModelName }}Delete[U]) (*T, error) {
+  existing, err := FindUnique{{ .ModelName }}[T, U](ctx, db, {{ .ModelName }}FindUnique[U]{
+    Where:  q.Where,
+    Select: q.Select,
+  })
+  if err != nil {
+    return nil, err
+  }
+  d := {{ $.DialectInit }}
+  state := newArgState(d)
+  alias := "t0"
+  whereClause, err := build{{ .ModelName }}UniquePredicate(d, alias, state, q.Where)
+  if err != nil {
+    return nil, err
+  }
+  if err := ensureParamLimit(d, len(state.Args())); err != nil {
+    return nil, err
+  }
+  sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s", d.QuoteIdent("{{ .TableName }}"), whereClause)
+  res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+  if err != nil {
+    return nil, err
+  }
+  affected, err := res.RowsAffected()
+  if err != nil {
+    return nil, err
+  }
+  if affected == 0 {
+    return nil, sql.ErrNoRows
+  }
+  return existing, nil
+}
+{{- end }}
+
+type {{ .ModelName }}DeleteMany struct {
+  Where *{{ .ModelName }}WhereInput
+}
+
+func DeleteMany{{ .ModelName }}(ctx context.Context, db bom.Querier, q {{ .ModelName }}DeleteMany) (int64, error) {
+  d := {{ $.DialectInit }}
+  state := newArgState(d)
+  whereClause := build{{ .ModelName }}Where(d, "t0", state, q.Where)
+  if err := ensureParamLimit(d, len(state.Args())); err != nil {
+    return 0, err
+  }
+  sqlStr := fmt.Sprintf("DELETE FROM %s", d.QuoteIdent("{{ .TableName }}"))
+  if whereClause != "" {
+    sqlStr += " WHERE " + whereClause
+  }
+  res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
+  if err != nil {
+    return 0, err
+  }
+  return res.RowsAffected()
+}
+
+{{ end }}
+{{ end }}

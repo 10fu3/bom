@@ -4,7 +4,7 @@ Bom は Prisma 互換の入力モデルを Go 構造体で表現する軽量 ORM
 
 ## 主な特徴
 - **Prisma と同じ概念**：`Where` / `OrderBy` / `Select` / `Distinct` / `Take` / `Skip` / ネストしたリレーション / `CreateOne` / `CreateMany` の入力を構造体で記述。
-- **読み書きサポート**：`FindMany` / `FindFirst` / `FindUnique` に加え、ネストした `CreateOne` / `CreateMany` (AUTO_INCREMENT / UUIDv4/v7 / ULID / CUID 自動採番) を安全に実行。
+- **読み書きサポート**：`FindMany` / `FindFirst` / `FindUnique` に加え、ネストした `CreateOne` / `CreateMany` (AUTO_INCREMENT / UUIDv4/v7 / ULID / CUID 自動採番) と `UpdateOne` / `UpdateMany` / `DeleteOne` / `DeleteMany` を安全に実行。
 - **型安全なユニーク検索**：ユニーク制約ごとに専用構造体 + インターフェースを生成するため、誤ったキーで `FindUnique` を呼べません。
 - **Dialect 抽象化**：識別子の引用・プレースホルダ・JSON 集計・ILIKE/LcLike・`DISTINCT ON` などの差分を `pkg/dialect/*` が担当。
 - **スキーマ駆動コード生成**：DDL→AST→IR→アソシエーション解決→Go テンプレートというパイプラインで `pkg/generated` を構築。
@@ -156,7 +156,7 @@ go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
   （`examples/postgres/docker/postgres/Dockerfile` でイメージをビルドし、`--tmpfs /var/lib/postgresql/data` 付きでコンテナを起動して `TEST_POSTGRES_DSN` を設定し、`go test -tags postgresserver ./examples/postgres` を実行します。ホスト側のポートを変える場合は `PG_HOST_PORT=5433 scripts/run_postgres_integration.sh` のように指定してください。）
 
 ## 制限と今後の予定
-- 書き込み系は `CreateOne` (INSERT) のみ対応。UPDATE/DELETE は未サポートです。
+- `Upsert` は未サポートです。
 - `bomgen` が使用する DDL パーサは MySQL(TiDB) と goyacc 製 SQLite を同梱。PostgreSQL 連携は作業中です。
 - `SelectAll` にリレーションは含まれません。循環参照を避けるための仕様です。
 
