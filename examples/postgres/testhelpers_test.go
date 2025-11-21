@@ -369,3 +369,174 @@ func runCreateAssertions(t *testing.T, ctx context.Context, querier bom.Querier)
 		t.Fatalf("nested relation not inserted: %#v", videoRecord)
 	}
 }
+
+func runClauseInjectionAssertions(t *testing.T, ctx context.Context, querier bom.Querier) {
+	t.Helper()
+
+	expectColumnError := func(kind string, err error) {
+		t.Helper()
+		if err == nil {
+			t.Fatalf("%s: expected error for malicious identifier", kind)
+		}
+		if !strings.Contains(strings.ToLower(err.Error()), "does not exist") {
+			t.Fatalf("%s: unexpected error %v", kind, err)
+		}
+	}
+
+	maliciousIdent := `name" DESC; DROP TABLE author; --`
+
+	_, err := generated.FindManyAuthor[generated.Author](ctx, querier, generated.AuthorFindMany{
+		Select: generated.AuthorSelect{
+			generated.AuthorField(maliciousIdent),
+		},
+	})
+	expectColumnError("select", err)
+
+	_, err = generated.FindManyAuthor[generated.Author](ctx, querier, generated.AuthorFindMany{
+		Select: generated.AuthorSelect{
+			generated.AuthorFieldId,
+		},
+		OrderBy: []generated.AuthorOrderByInput{
+			{Field: generated.AuthorField(maliciousIdent), Direction: generated.OrderDirectionASC},
+		},
+	})
+	expectColumnError("order", err)
+
+	_, err = generated.FindManyAuthor[generated.Author](ctx, querier, generated.AuthorFindMany{
+		Select: generated.AuthorSelect{
+			generated.AuthorFieldId,
+		},
+		Distinct: []generated.AuthorField{
+			generated.AuthorField(maliciousIdent),
+		},
+	})
+	expectColumnError("distinct", err)
+
+	limited, err := generated.FindManyAuthor[generated.Author](ctx, querier, generated.AuthorFindMany{
+		Select: generated.AuthorSelect{
+			generated.AuthorFieldId,
+		},
+		OrderBy: []generated.AuthorOrderByInput{
+			{Field: generated.AuthorFieldId, Direction: generated.OrderDirectionASC},
+		},
+		Take: opt.OVal(1),
+		Skip: opt.OVal(1),
+	})
+	if err != nil {
+		t.Fatalf("FindManyAuthor limit/offset failed: %v", err)
+	}
+	if len(limited) != 1 || limited[0].Id != 2 {
+		t.Fatalf("limit/offset did not return expected record: %#v", limited)
+	}
+
+	after, err := generated.FindManyAuthor[generated.Author](ctx, querier, generated.AuthorFindMany{
+		Select: generated.AuthorSelect{
+			generated.AuthorFieldId,
+			generated.AuthorFieldEmail,
+		},
+		OrderBy: []generated.AuthorOrderByInput{
+			{Field: generated.AuthorFieldId, Direction: generated.OrderDirectionASC},
+		},
+	})
+	if err != nil {
+		t.Fatalf("FindManyAuthor after clause injections failed: %v", err)
+	}
+	if len(after) < 2 || after[0].Email != "alice@example.com" || after[1].Email != "bob@example.com" {
+		t.Fatalf("author records changed unexpectedly: %#v", after)
+	}
+}
+
+func runMutationInjectionAssertions(t *testing.T, ctx context.Context, querier bom.Querier) {
+	t.Helper()
+
+	insertPayload := `Mallory'); DROP TABLE author; --`
+	newAuthorID := int64(280)
+	created, err := generated.CreateOneAuthor[generated.Author](ctx, querier, generated.AuthorCreate{
+		Data: generated.AuthorCreateData{
+			Id:        opt.OVal(newAuthorID),
+			Name:      opt.OVal(insertPayload),
+			Email:     opt.OVal("mallory@example.com"),
+			CreatedAt: opt.OVal("2024-05-01"),
+		},
+		Select: generated.AuthorSelect{
+			generated.AuthorFieldId,
+			generated.AuthorFieldName,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateOneAuthor malicious insert failed: %v", err)
+	}
+	if created == nil || created.Name != insertPayload {
+		t.Fatalf("malicious payload not stored verbatim: %#v", created)
+	}
+
+	updatePayload := `Alice'); UPDATE author SET name='pwned'; --`
+	updated, err := generated.UpdateOneAuthor[generated.Author](ctx, querier, generated.AuthorUpdate[generated.AuthorUK_Id]{
+		Where: generated.AuthorUK_Id{Id: 1},
+		Data: generated.AuthorUpdateData{
+			Name: opt.OVal(updatePayload),
+		},
+		Select: generated.AuthorSelect{
+			generated.AuthorFieldId,
+			generated.AuthorFieldName,
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateOneAuthor malicious payload failed: %v", err)
+	}
+	if updated == nil || updated.Name != updatePayload {
+		t.Fatalf("update payload not round-tripped: %#v", updated)
+	}
+
+	deletePayload := "alice@example.com' OR 1=1 --"
+	affected, err := generated.DeleteManyAuthor(ctx, querier, generated.AuthorDeleteMany{
+		Where: &generated.AuthorWhereInput{
+			Email: opt.OVal(deletePayload),
+		},
+	})
+	if err != nil {
+		t.Fatalf("DeleteManyAuthor malicious payload failed: %v", err)
+	}
+	if affected != 0 {
+		t.Fatalf("malicious delete should not remove rows, deleted=%d", affected)
+	}
+
+	cleanupDeleted, err := generated.DeleteManyAuthor(ctx, querier, generated.AuthorDeleteMany{
+		Where: &generated.AuthorWhereInput{
+			Id: opt.OVal(newAuthorID),
+		},
+	})
+	if err != nil {
+		t.Fatalf("cleanup delete failed: %v", err)
+	}
+	if cleanupDeleted != 1 {
+		t.Fatalf("expected inserted row to be deleted, deleted=%d", cleanupDeleted)
+	}
+
+	_, err = generated.UpdateOneAuthor[generated.Author](ctx, querier, generated.AuthorUpdate[generated.AuthorUK_Id]{
+		Where: generated.AuthorUK_Id{Id: 1},
+		Data: generated.AuthorUpdateData{
+			Name: opt.OVal("Alice"),
+		},
+		Select: generated.AuthorSelect{
+			generated.AuthorFieldId,
+		},
+	})
+	if err != nil {
+		t.Fatalf("resetting Alice name failed: %v", err)
+	}
+
+	finalAuthor, err := generated.FindUniqueAuthor[generated.Author](ctx, querier, generated.AuthorFindUnique[generated.AuthorUK_Id]{
+		Where: generated.AuthorUK_Id{Id: 1},
+		Select: generated.AuthorSelect{
+			generated.AuthorFieldId,
+			generated.AuthorFieldName,
+		},
+	})
+	if err != nil {
+		t.Fatalf("FindUniqueAuthor final check failed: %v", err)
+	}
+	if finalAuthor == nil || finalAuthor.Name != "Alice" {
+		t.Fatalf("author record corrupted after mutations: %#v", finalAuthor)
+	}
+}

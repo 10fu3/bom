@@ -129,24 +129,6 @@ func one() *int64 {
 
 var identityGenerator bom.IdentityGenerator = &bom.DefaultIdentityGenerator{}
 
-func buildInsertSQL(d dialect.Dialect, table string, columns, placeholders []string) string {
-	tableIdent := d.QuoteIdent(table)
-	if len(columns) == 0 {
-		switch strings.ToLower(d.Name()) {
-		case "postgres":
-			return fmt.Sprintf("INSERT INTO %s DEFAULT VALUES", tableIdent)
-		default:
-			return fmt.Sprintf("INSERT INTO %s () VALUES ()", tableIdent)
-		}
-	}
-	return fmt.Sprintf(
-		"INSERT INTO %s (%s) VALUES (%s)",
-		tableIdent,
-		strings.Join(columns, ", "),
-		strings.Join(placeholders, ", "),
-	)
-}
-
 func maxParameters(d dialect.Dialect) int {
 	if cap := d.Cap().MaxParameters; cap > 0 {
 		return cap
@@ -3892,33 +3874,37 @@ func createAuthorRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, 
 	var wantsAutoCreatedAt bool
 	if data.Id.IsSome() {
 		val := data.Id.Value()
-		columns = append(columns, d.QuoteIdent("id"))
+		columns = append(columns, "id")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 		wantsAutoId = true
 	}
 	if data.Name.IsSome() {
 		val := data.Name.Value()
-		columns = append(columns, d.QuoteIdent("name"))
+		columns = append(columns, "name")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 	}
 	if data.Email.IsSome() {
 		val := data.Email.Value()
-		columns = append(columns, d.QuoteIdent("email"))
+		columns = append(columns, "email")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 	}
 	if data.CreatedAt.IsSome() {
 		val := data.CreatedAt.Value()
-		columns = append(columns, d.QuoteIdent("created_at"))
+		columns = append(columns, "created_at")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 	}
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return err
 	}
-	sqlStr := buildInsertSQL(d, "author", columns, placeholders)
+	insertInput := planner.InsertInput{
+		Table:   "author",
+		Columns: columns,
+		Values:  placeholders,
+	}
 	autoCount := 0
 	if wantsAutoId {
 		autoCount++
@@ -3937,20 +3923,24 @@ func createAuthorRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, 
 		returning = true
 		var returningCols []string
 		if wantsAutoId {
-			returningCols = append(returningCols, d.QuoteIdent("id"))
+			returningCols = append(returningCols, "id")
 		}
 		if wantsAutoName {
-			returningCols = append(returningCols, d.QuoteIdent("name"))
+			returningCols = append(returningCols, "name")
 		}
 		if wantsAutoEmail {
-			returningCols = append(returningCols, d.QuoteIdent("email"))
+			returningCols = append(returningCols, "email")
 		}
 		if wantsAutoCreatedAt {
-			returningCols = append(returningCols, d.QuoteIdent("created_at"))
+			returningCols = append(returningCols, "created_at")
 		}
 		if len(returningCols) > 0 {
-			sqlStr = sqlStr + " RETURNING " + strings.Join(returningCols, ", ")
+			insertInput.Returning = returningCols
 		}
+	}
+	sqlStr, err := planner.BuildInsert(d, insertInput)
+	if err != nil {
+		return err
 	}
 	if returning {
 		rows, err := db.QueryContext(ctx, sqlStr, state.Args()...)
@@ -4170,39 +4160,43 @@ func createAuthorProfileRecord(ctx context.Context, db bom.Querier, d dialect.Di
 	var wantsAutoCreatedAt bool
 	if data.Id.IsSome() {
 		val := data.Id.Value()
-		columns = append(columns, d.QuoteIdent("id"))
+		columns = append(columns, "id")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 		wantsAutoId = true
 	}
 	if data.AuthorId.IsSome() {
 		val := data.AuthorId.Value()
-		columns = append(columns, d.QuoteIdent("author_id"))
+		columns = append(columns, "author_id")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 	}
 	if data.Bio.IsSome() {
 		val := data.Bio.Value()
-		columns = append(columns, d.QuoteIdent("bio"))
+		columns = append(columns, "bio")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 	}
 	if data.AvatarUrl.IsSome() {
 		val := data.AvatarUrl.Value()
-		columns = append(columns, d.QuoteIdent("avatar_url"))
+		columns = append(columns, "avatar_url")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 	}
 	if data.CreatedAt.IsSome() {
 		val := data.CreatedAt.Value()
-		columns = append(columns, d.QuoteIdent("created_at"))
+		columns = append(columns, "created_at")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 	}
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return err
 	}
-	sqlStr := buildInsertSQL(d, "author_profile", columns, placeholders)
+	insertInput := planner.InsertInput{
+		Table:   "author_profile",
+		Columns: columns,
+		Values:  placeholders,
+	}
 	autoCount := 0
 	if wantsAutoId {
 		autoCount++
@@ -4224,23 +4218,27 @@ func createAuthorProfileRecord(ctx context.Context, db bom.Querier, d dialect.Di
 		returning = true
 		var returningCols []string
 		if wantsAutoId {
-			returningCols = append(returningCols, d.QuoteIdent("id"))
+			returningCols = append(returningCols, "id")
 		}
 		if wantsAutoAuthorId {
-			returningCols = append(returningCols, d.QuoteIdent("author_id"))
+			returningCols = append(returningCols, "author_id")
 		}
 		if wantsAutoBio {
-			returningCols = append(returningCols, d.QuoteIdent("bio"))
+			returningCols = append(returningCols, "bio")
 		}
 		if wantsAutoAvatarUrl {
-			returningCols = append(returningCols, d.QuoteIdent("avatar_url"))
+			returningCols = append(returningCols, "avatar_url")
 		}
 		if wantsAutoCreatedAt {
-			returningCols = append(returningCols, d.QuoteIdent("created_at"))
+			returningCols = append(returningCols, "created_at")
 		}
 		if len(returningCols) > 0 {
-			sqlStr = sqlStr + " RETURNING " + strings.Join(returningCols, ", ")
+			insertInput.Returning = returningCols
 		}
+	}
+	sqlStr, err := planner.BuildInsert(d, insertInput)
+	if err != nil {
+		return err
 	}
 	if returning {
 		rows, err := db.QueryContext(ctx, sqlStr, state.Args()...)
@@ -4425,45 +4423,49 @@ func createVideoRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, d
 	var wantsAutoCreatedAt bool
 	if data.Id.IsSome() {
 		val := data.Id.Value()
-		columns = append(columns, d.QuoteIdent("id"))
+		columns = append(columns, "id")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 		wantsAutoId = true
 	}
 	if data.Title.IsSome() {
 		val := data.Title.Value()
-		columns = append(columns, d.QuoteIdent("title"))
+		columns = append(columns, "title")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 	}
 	if data.Slug.IsSome() {
 		val := data.Slug.Value()
-		columns = append(columns, d.QuoteIdent("slug"))
+		columns = append(columns, "slug")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 	}
 	if data.AuthorId.IsSome() {
 		val := data.AuthorId.Value()
-		columns = append(columns, d.QuoteIdent("author_id"))
+		columns = append(columns, "author_id")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 	}
 	if data.Description.IsSome() {
 		val := data.Description.Value()
-		columns = append(columns, d.QuoteIdent("description"))
+		columns = append(columns, "description")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 	}
 	if data.CreatedAt.IsSome() {
 		val := data.CreatedAt.Value()
-		columns = append(columns, d.QuoteIdent("created_at"))
+		columns = append(columns, "created_at")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 	}
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return err
 	}
-	sqlStr := buildInsertSQL(d, "video", columns, placeholders)
+	insertInput := planner.InsertInput{
+		Table:   "video",
+		Columns: columns,
+		Values:  placeholders,
+	}
 	autoCount := 0
 	if wantsAutoId {
 		autoCount++
@@ -4488,26 +4490,30 @@ func createVideoRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, d
 		returning = true
 		var returningCols []string
 		if wantsAutoId {
-			returningCols = append(returningCols, d.QuoteIdent("id"))
+			returningCols = append(returningCols, "id")
 		}
 		if wantsAutoTitle {
-			returningCols = append(returningCols, d.QuoteIdent("title"))
+			returningCols = append(returningCols, "title")
 		}
 		if wantsAutoSlug {
-			returningCols = append(returningCols, d.QuoteIdent("slug"))
+			returningCols = append(returningCols, "slug")
 		}
 		if wantsAutoAuthorId {
-			returningCols = append(returningCols, d.QuoteIdent("author_id"))
+			returningCols = append(returningCols, "author_id")
 		}
 		if wantsAutoDescription {
-			returningCols = append(returningCols, d.QuoteIdent("description"))
+			returningCols = append(returningCols, "description")
 		}
 		if wantsAutoCreatedAt {
-			returningCols = append(returningCols, d.QuoteIdent("created_at"))
+			returningCols = append(returningCols, "created_at")
 		}
 		if len(returningCols) > 0 {
-			sqlStr = sqlStr + " RETURNING " + strings.Join(returningCols, ", ")
+			insertInput.Returning = returningCols
 		}
+	}
+	sqlStr, err := planner.BuildInsert(d, insertInput)
+	if err != nil {
+		return err
 	}
 	if returning {
 		rows, err := db.QueryContext(ctx, sqlStr, state.Args()...)
@@ -4722,39 +4728,43 @@ func createCommentRecord(ctx context.Context, db bom.Querier, d dialect.Dialect,
 	var wantsAutoCreatedAt bool
 	if data.Id.IsSome() {
 		val := data.Id.Value()
-		columns = append(columns, d.QuoteIdent("id"))
+		columns = append(columns, "id")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 		wantsAutoId = true
 	}
 	if data.VideoId.IsSome() {
 		val := data.VideoId.Value()
-		columns = append(columns, d.QuoteIdent("video_id"))
+		columns = append(columns, "video_id")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 	}
 	if data.AuthorId.IsSome() {
 		val := data.AuthorId.Value()
-		columns = append(columns, d.QuoteIdent("author_id"))
+		columns = append(columns, "author_id")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 	}
 	if data.Body.IsSome() {
 		val := data.Body.Value()
-		columns = append(columns, d.QuoteIdent("body"))
+		columns = append(columns, "body")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 	}
 	if data.CreatedAt.IsSome() {
 		val := data.CreatedAt.Value()
-		columns = append(columns, d.QuoteIdent("created_at"))
+		columns = append(columns, "created_at")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 	}
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return err
 	}
-	sqlStr := buildInsertSQL(d, "comment", columns, placeholders)
+	insertInput := planner.InsertInput{
+		Table:   "comment",
+		Columns: columns,
+		Values:  placeholders,
+	}
 	autoCount := 0
 	if wantsAutoId {
 		autoCount++
@@ -4776,23 +4786,27 @@ func createCommentRecord(ctx context.Context, db bom.Querier, d dialect.Dialect,
 		returning = true
 		var returningCols []string
 		if wantsAutoId {
-			returningCols = append(returningCols, d.QuoteIdent("id"))
+			returningCols = append(returningCols, "id")
 		}
 		if wantsAutoVideoId {
-			returningCols = append(returningCols, d.QuoteIdent("video_id"))
+			returningCols = append(returningCols, "video_id")
 		}
 		if wantsAutoAuthorId {
-			returningCols = append(returningCols, d.QuoteIdent("author_id"))
+			returningCols = append(returningCols, "author_id")
 		}
 		if wantsAutoBody {
-			returningCols = append(returningCols, d.QuoteIdent("body"))
+			returningCols = append(returningCols, "body")
 		}
 		if wantsAutoCreatedAt {
-			returningCols = append(returningCols, d.QuoteIdent("created_at"))
+			returningCols = append(returningCols, "created_at")
 		}
 		if len(returningCols) > 0 {
-			sqlStr = sqlStr + " RETURNING " + strings.Join(returningCols, ", ")
+			insertInput.Returning = returningCols
 		}
+	}
+	sqlStr, err := planner.BuildInsert(d, insertInput)
+	if err != nil {
+		return err
 	}
 	if returning {
 		rows, err := db.QueryContext(ctx, sqlStr, state.Args()...)
@@ -4968,21 +4982,25 @@ func createTagRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, dat
 	var wantsAutoName bool
 	if data.Id.IsSome() {
 		val := data.Id.Value()
-		columns = append(columns, d.QuoteIdent("id"))
+		columns = append(columns, "id")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 		wantsAutoId = true
 	}
 	if data.Name.IsSome() {
 		val := data.Name.Value()
-		columns = append(columns, d.QuoteIdent("name"))
+		columns = append(columns, "name")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 	}
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return err
 	}
-	sqlStr := buildInsertSQL(d, "tag", columns, placeholders)
+	insertInput := planner.InsertInput{
+		Table:   "tag",
+		Columns: columns,
+		Values:  placeholders,
+	}
 	autoCount := 0
 	if wantsAutoId {
 		autoCount++
@@ -4995,14 +5013,18 @@ func createTagRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, dat
 		returning = true
 		var returningCols []string
 		if wantsAutoId {
-			returningCols = append(returningCols, d.QuoteIdent("id"))
+			returningCols = append(returningCols, "id")
 		}
 		if wantsAutoName {
-			returningCols = append(returningCols, d.QuoteIdent("name"))
+			returningCols = append(returningCols, "name")
 		}
 		if len(returningCols) > 0 {
-			sqlStr = sqlStr + " RETURNING " + strings.Join(returningCols, ", ")
+			insertInput.Returning = returningCols
 		}
+	}
+	sqlStr, err := planner.BuildInsert(d, insertInput)
+	if err != nil {
+		return err
 	}
 	if returning {
 		rows, err := db.QueryContext(ctx, sqlStr, state.Args()...)
@@ -5152,20 +5174,24 @@ func createVideoTagRecord(ctx context.Context, db bom.Querier, d dialect.Dialect
 	var wantsAutoTagId bool
 	if data.VideoId.IsSome() {
 		val := data.VideoId.Value()
-		columns = append(columns, d.QuoteIdent("video_id"))
+		columns = append(columns, "video_id")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 	}
 	if data.TagId.IsSome() {
 		val := data.TagId.Value()
-		columns = append(columns, d.QuoteIdent("tag_id"))
+		columns = append(columns, "tag_id")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 	}
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return err
 	}
-	sqlStr := buildInsertSQL(d, "video_tag", columns, placeholders)
+	insertInput := planner.InsertInput{
+		Table:   "video_tag",
+		Columns: columns,
+		Values:  placeholders,
+	}
 	autoCount := 0
 	if wantsAutoVideoId {
 		autoCount++
@@ -5178,14 +5204,18 @@ func createVideoTagRecord(ctx context.Context, db bom.Querier, d dialect.Dialect
 		returning = true
 		var returningCols []string
 		if wantsAutoVideoId {
-			returningCols = append(returningCols, d.QuoteIdent("video_id"))
+			returningCols = append(returningCols, "video_id")
 		}
 		if wantsAutoTagId {
-			returningCols = append(returningCols, d.QuoteIdent("tag_id"))
+			returningCols = append(returningCols, "tag_id")
 		}
 		if len(returningCols) > 0 {
-			sqlStr = sqlStr + " RETURNING " + strings.Join(returningCols, ", ")
+			insertInput.Returning = returningCols
 		}
+	}
+	sqlStr, err := planner.BuildInsert(d, insertInput)
+	if err != nil {
+		return err
 	}
 	if returning {
 		rows, err := db.QueryContext(ctx, sqlStr, state.Args()...)
@@ -5697,9 +5727,9 @@ type AuthorUpdateData struct {
 	CreatedAt opt.Opt[string]
 }
 
-func buildAuthorUpdateSet(d dialect.Dialect, state *argState, data *AuthorUpdateData) (string, int) {
+func buildAuthorUpdateSet(d dialect.Dialect, state *argState, data *AuthorUpdateData) ([]string, int) {
 	if data == nil {
-		return "", 0
+		return nil, 0
 	}
 	var parts []string
 	if data.Id.IsSome() {
@@ -5714,7 +5744,7 @@ func buildAuthorUpdateSet(d dialect.Dialect, state *argState, data *AuthorUpdate
 	if data.CreatedAt.IsSome() {
 		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("created_at"), state.Add(data.CreatedAt.Value())))
 	}
-	return strings.Join(parts, ", "), len(parts)
+	return parts, len(parts)
 }
 
 type AuthorUpdate[U AuthorUnique] struct {
@@ -5726,11 +5756,11 @@ type AuthorUpdate[U AuthorUnique] struct {
 func UpdateOneAuthor[T AuthorModel, U AuthorUnique](ctx context.Context, db bom.Querier, q AuthorUpdate[U]) (*T, error) {
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	setSQL, count := buildAuthorUpdateSet(d, state, &q.Data)
+	setClauses, count := buildAuthorUpdateSet(d, state, &q.Data)
 	if count == 0 {
 		return nil, fmt.Errorf("AuthorUpdate requires at least one field to update")
 	}
-	alias := "t0"
+	alias := "author"
 	whereClause, err := buildAuthorUniquePredicate(d, alias, state, q.Where)
 	if err != nil {
 		return nil, err
@@ -5738,7 +5768,14 @@ func UpdateOneAuthor[T AuthorModel, U AuthorUnique](ctx context.Context, db bom.
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return nil, err
 	}
-	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("author"), setSQL, whereClause)
+	sqlStr, err := planner.BuildUpdate(d, planner.UpdateInput{
+		Table:      "author",
+		SetClauses: setClauses,
+		Where:      whereClause,
+	})
+	if err != nil {
+		return nil, err
+	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
 		return nil, err
@@ -5787,17 +5824,21 @@ type AuthorUpdateMany struct {
 func UpdateManyAuthor(ctx context.Context, db bom.Querier, q AuthorUpdateMany) (int64, error) {
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	setSQL, count := buildAuthorUpdateSet(d, state, &q.Data)
+	setClauses, count := buildAuthorUpdateSet(d, state, &q.Data)
 	if count == 0 {
 		return 0, fmt.Errorf("AuthorUpdateMany requires at least one field to update")
 	}
-	whereClause := buildAuthorWhere(d, "t0", state, q.Where)
+	whereClause := buildAuthorWhere(d, "author", state, q.Where)
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return 0, err
 	}
-	sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("author"), setSQL)
-	if whereClause != "" {
-		sqlStr += " WHERE " + whereClause
+	sqlStr, err := planner.BuildUpdate(d, planner.UpdateInput{
+		Table:      "author",
+		SetClauses: setClauses,
+		Where:      whereClause,
+	})
+	if err != nil {
+		return 0, err
 	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
@@ -5814,9 +5855,9 @@ type AuthorProfileUpdateData struct {
 	CreatedAt opt.Opt[string]
 }
 
-func buildAuthorProfileUpdateSet(d dialect.Dialect, state *argState, data *AuthorProfileUpdateData) (string, int) {
+func buildAuthorProfileUpdateSet(d dialect.Dialect, state *argState, data *AuthorProfileUpdateData) ([]string, int) {
 	if data == nil {
-		return "", 0
+		return nil, 0
 	}
 	var parts []string
 	if data.Id.IsSome() {
@@ -5834,7 +5875,7 @@ func buildAuthorProfileUpdateSet(d dialect.Dialect, state *argState, data *Autho
 	if data.CreatedAt.IsSome() {
 		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("created_at"), state.Add(data.CreatedAt.Value())))
 	}
-	return strings.Join(parts, ", "), len(parts)
+	return parts, len(parts)
 }
 
 type AuthorProfileUpdate[U AuthorProfileUnique] struct {
@@ -5846,11 +5887,11 @@ type AuthorProfileUpdate[U AuthorProfileUnique] struct {
 func UpdateOneAuthorProfile[T AuthorProfileModel, U AuthorProfileUnique](ctx context.Context, db bom.Querier, q AuthorProfileUpdate[U]) (*T, error) {
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	setSQL, count := buildAuthorProfileUpdateSet(d, state, &q.Data)
+	setClauses, count := buildAuthorProfileUpdateSet(d, state, &q.Data)
 	if count == 0 {
 		return nil, fmt.Errorf("AuthorProfileUpdate requires at least one field to update")
 	}
-	alias := "t0"
+	alias := "author_profile"
 	whereClause, err := buildAuthorProfileUniquePredicate(d, alias, state, q.Where)
 	if err != nil {
 		return nil, err
@@ -5858,7 +5899,14 @@ func UpdateOneAuthorProfile[T AuthorProfileModel, U AuthorProfileUnique](ctx con
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return nil, err
 	}
-	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("author_profile"), setSQL, whereClause)
+	sqlStr, err := planner.BuildUpdate(d, planner.UpdateInput{
+		Table:      "author_profile",
+		SetClauses: setClauses,
+		Where:      whereClause,
+	})
+	if err != nil {
+		return nil, err
+	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
 		return nil, err
@@ -5907,17 +5955,21 @@ type AuthorProfileUpdateMany struct {
 func UpdateManyAuthorProfile(ctx context.Context, db bom.Querier, q AuthorProfileUpdateMany) (int64, error) {
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	setSQL, count := buildAuthorProfileUpdateSet(d, state, &q.Data)
+	setClauses, count := buildAuthorProfileUpdateSet(d, state, &q.Data)
 	if count == 0 {
 		return 0, fmt.Errorf("AuthorProfileUpdateMany requires at least one field to update")
 	}
-	whereClause := buildAuthorProfileWhere(d, "t0", state, q.Where)
+	whereClause := buildAuthorProfileWhere(d, "author_profile", state, q.Where)
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return 0, err
 	}
-	sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("author_profile"), setSQL)
-	if whereClause != "" {
-		sqlStr += " WHERE " + whereClause
+	sqlStr, err := planner.BuildUpdate(d, planner.UpdateInput{
+		Table:      "author_profile",
+		SetClauses: setClauses,
+		Where:      whereClause,
+	})
+	if err != nil {
+		return 0, err
 	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
@@ -5935,9 +5987,9 @@ type VideoUpdateData struct {
 	CreatedAt   opt.Opt[string]
 }
 
-func buildVideoUpdateSet(d dialect.Dialect, state *argState, data *VideoUpdateData) (string, int) {
+func buildVideoUpdateSet(d dialect.Dialect, state *argState, data *VideoUpdateData) ([]string, int) {
 	if data == nil {
-		return "", 0
+		return nil, 0
 	}
 	var parts []string
 	if data.Id.IsSome() {
@@ -5958,7 +6010,7 @@ func buildVideoUpdateSet(d dialect.Dialect, state *argState, data *VideoUpdateDa
 	if data.CreatedAt.IsSome() {
 		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("created_at"), state.Add(data.CreatedAt.Value())))
 	}
-	return strings.Join(parts, ", "), len(parts)
+	return parts, len(parts)
 }
 
 type VideoUpdate[U VideoUnique] struct {
@@ -5970,11 +6022,11 @@ type VideoUpdate[U VideoUnique] struct {
 func UpdateOneVideo[T VideoModel, U VideoUnique](ctx context.Context, db bom.Querier, q VideoUpdate[U]) (*T, error) {
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	setSQL, count := buildVideoUpdateSet(d, state, &q.Data)
+	setClauses, count := buildVideoUpdateSet(d, state, &q.Data)
 	if count == 0 {
 		return nil, fmt.Errorf("VideoUpdate requires at least one field to update")
 	}
-	alias := "t0"
+	alias := "video"
 	whereClause, err := buildVideoUniquePredicate(d, alias, state, q.Where)
 	if err != nil {
 		return nil, err
@@ -5982,7 +6034,14 @@ func UpdateOneVideo[T VideoModel, U VideoUnique](ctx context.Context, db bom.Que
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return nil, err
 	}
-	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("video"), setSQL, whereClause)
+	sqlStr, err := planner.BuildUpdate(d, planner.UpdateInput{
+		Table:      "video",
+		SetClauses: setClauses,
+		Where:      whereClause,
+	})
+	if err != nil {
+		return nil, err
+	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
 		return nil, err
@@ -6031,17 +6090,21 @@ type VideoUpdateMany struct {
 func UpdateManyVideo(ctx context.Context, db bom.Querier, q VideoUpdateMany) (int64, error) {
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	setSQL, count := buildVideoUpdateSet(d, state, &q.Data)
+	setClauses, count := buildVideoUpdateSet(d, state, &q.Data)
 	if count == 0 {
 		return 0, fmt.Errorf("VideoUpdateMany requires at least one field to update")
 	}
-	whereClause := buildVideoWhere(d, "t0", state, q.Where)
+	whereClause := buildVideoWhere(d, "video", state, q.Where)
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return 0, err
 	}
-	sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("video"), setSQL)
-	if whereClause != "" {
-		sqlStr += " WHERE " + whereClause
+	sqlStr, err := planner.BuildUpdate(d, planner.UpdateInput{
+		Table:      "video",
+		SetClauses: setClauses,
+		Where:      whereClause,
+	})
+	if err != nil {
+		return 0, err
 	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
@@ -6058,9 +6121,9 @@ type CommentUpdateData struct {
 	CreatedAt opt.Opt[string]
 }
 
-func buildCommentUpdateSet(d dialect.Dialect, state *argState, data *CommentUpdateData) (string, int) {
+func buildCommentUpdateSet(d dialect.Dialect, state *argState, data *CommentUpdateData) ([]string, int) {
 	if data == nil {
-		return "", 0
+		return nil, 0
 	}
 	var parts []string
 	if data.Id.IsSome() {
@@ -6078,7 +6141,7 @@ func buildCommentUpdateSet(d dialect.Dialect, state *argState, data *CommentUpda
 	if data.CreatedAt.IsSome() {
 		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("created_at"), state.Add(data.CreatedAt.Value())))
 	}
-	return strings.Join(parts, ", "), len(parts)
+	return parts, len(parts)
 }
 
 type CommentUpdate[U CommentUnique] struct {
@@ -6090,11 +6153,11 @@ type CommentUpdate[U CommentUnique] struct {
 func UpdateOneComment[T CommentModel, U CommentUnique](ctx context.Context, db bom.Querier, q CommentUpdate[U]) (*T, error) {
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	setSQL, count := buildCommentUpdateSet(d, state, &q.Data)
+	setClauses, count := buildCommentUpdateSet(d, state, &q.Data)
 	if count == 0 {
 		return nil, fmt.Errorf("CommentUpdate requires at least one field to update")
 	}
-	alias := "t0"
+	alias := "comment"
 	whereClause, err := buildCommentUniquePredicate(d, alias, state, q.Where)
 	if err != nil {
 		return nil, err
@@ -6102,7 +6165,14 @@ func UpdateOneComment[T CommentModel, U CommentUnique](ctx context.Context, db b
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return nil, err
 	}
-	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("comment"), setSQL, whereClause)
+	sqlStr, err := planner.BuildUpdate(d, planner.UpdateInput{
+		Table:      "comment",
+		SetClauses: setClauses,
+		Where:      whereClause,
+	})
+	if err != nil {
+		return nil, err
+	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
 		return nil, err
@@ -6145,17 +6215,21 @@ type CommentUpdateMany struct {
 func UpdateManyComment(ctx context.Context, db bom.Querier, q CommentUpdateMany) (int64, error) {
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	setSQL, count := buildCommentUpdateSet(d, state, &q.Data)
+	setClauses, count := buildCommentUpdateSet(d, state, &q.Data)
 	if count == 0 {
 		return 0, fmt.Errorf("CommentUpdateMany requires at least one field to update")
 	}
-	whereClause := buildCommentWhere(d, "t0", state, q.Where)
+	whereClause := buildCommentWhere(d, "comment", state, q.Where)
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return 0, err
 	}
-	sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("comment"), setSQL)
-	if whereClause != "" {
-		sqlStr += " WHERE " + whereClause
+	sqlStr, err := planner.BuildUpdate(d, planner.UpdateInput{
+		Table:      "comment",
+		SetClauses: setClauses,
+		Where:      whereClause,
+	})
+	if err != nil {
+		return 0, err
 	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
@@ -6169,9 +6243,9 @@ type TagUpdateData struct {
 	Name opt.Opt[string]
 }
 
-func buildTagUpdateSet(d dialect.Dialect, state *argState, data *TagUpdateData) (string, int) {
+func buildTagUpdateSet(d dialect.Dialect, state *argState, data *TagUpdateData) ([]string, int) {
 	if data == nil {
-		return "", 0
+		return nil, 0
 	}
 	var parts []string
 	if data.Id.IsSome() {
@@ -6180,7 +6254,7 @@ func buildTagUpdateSet(d dialect.Dialect, state *argState, data *TagUpdateData) 
 	if data.Name.IsSome() {
 		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("name"), state.Add(data.Name.Value())))
 	}
-	return strings.Join(parts, ", "), len(parts)
+	return parts, len(parts)
 }
 
 type TagUpdate[U TagUnique] struct {
@@ -6192,11 +6266,11 @@ type TagUpdate[U TagUnique] struct {
 func UpdateOneTag[T TagModel, U TagUnique](ctx context.Context, db bom.Querier, q TagUpdate[U]) (*T, error) {
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	setSQL, count := buildTagUpdateSet(d, state, &q.Data)
+	setClauses, count := buildTagUpdateSet(d, state, &q.Data)
 	if count == 0 {
 		return nil, fmt.Errorf("TagUpdate requires at least one field to update")
 	}
-	alias := "t0"
+	alias := "tag"
 	whereClause, err := buildTagUniquePredicate(d, alias, state, q.Where)
 	if err != nil {
 		return nil, err
@@ -6204,7 +6278,14 @@ func UpdateOneTag[T TagModel, U TagUnique](ctx context.Context, db bom.Querier, 
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return nil, err
 	}
-	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("tag"), setSQL, whereClause)
+	sqlStr, err := planner.BuildUpdate(d, planner.UpdateInput{
+		Table:      "tag",
+		SetClauses: setClauses,
+		Where:      whereClause,
+	})
+	if err != nil {
+		return nil, err
+	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
 		return nil, err
@@ -6253,17 +6334,21 @@ type TagUpdateMany struct {
 func UpdateManyTag(ctx context.Context, db bom.Querier, q TagUpdateMany) (int64, error) {
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	setSQL, count := buildTagUpdateSet(d, state, &q.Data)
+	setClauses, count := buildTagUpdateSet(d, state, &q.Data)
 	if count == 0 {
 		return 0, fmt.Errorf("TagUpdateMany requires at least one field to update")
 	}
-	whereClause := buildTagWhere(d, "t0", state, q.Where)
+	whereClause := buildTagWhere(d, "tag", state, q.Where)
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return 0, err
 	}
-	sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("tag"), setSQL)
-	if whereClause != "" {
-		sqlStr += " WHERE " + whereClause
+	sqlStr, err := planner.BuildUpdate(d, planner.UpdateInput{
+		Table:      "tag",
+		SetClauses: setClauses,
+		Where:      whereClause,
+	})
+	if err != nil {
+		return 0, err
 	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
@@ -6277,9 +6362,9 @@ type VideoTagUpdateData struct {
 	TagId   opt.Opt[uint64]
 }
 
-func buildVideoTagUpdateSet(d dialect.Dialect, state *argState, data *VideoTagUpdateData) (string, int) {
+func buildVideoTagUpdateSet(d dialect.Dialect, state *argState, data *VideoTagUpdateData) ([]string, int) {
 	if data == nil {
-		return "", 0
+		return nil, 0
 	}
 	var parts []string
 	if data.VideoId.IsSome() {
@@ -6288,7 +6373,7 @@ func buildVideoTagUpdateSet(d dialect.Dialect, state *argState, data *VideoTagUp
 	if data.TagId.IsSome() {
 		parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("tag_id"), state.Add(data.TagId.Value())))
 	}
-	return strings.Join(parts, ", "), len(parts)
+	return parts, len(parts)
 }
 
 type VideoTagUpdate[U VideoTagUnique] struct {
@@ -6300,11 +6385,11 @@ type VideoTagUpdate[U VideoTagUnique] struct {
 func UpdateOneVideoTag[T VideoTagModel, U VideoTagUnique](ctx context.Context, db bom.Querier, q VideoTagUpdate[U]) (*T, error) {
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	setSQL, count := buildVideoTagUpdateSet(d, state, &q.Data)
+	setClauses, count := buildVideoTagUpdateSet(d, state, &q.Data)
 	if count == 0 {
 		return nil, fmt.Errorf("VideoTagUpdate requires at least one field to update")
 	}
-	alias := "t0"
+	alias := "video_tag"
 	whereClause, err := buildVideoTagUniquePredicate(d, alias, state, q.Where)
 	if err != nil {
 		return nil, err
@@ -6312,7 +6397,14 @@ func UpdateOneVideoTag[T VideoTagModel, U VideoTagUnique](ctx context.Context, d
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return nil, err
 	}
-	sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("video_tag"), setSQL, whereClause)
+	sqlStr, err := planner.BuildUpdate(d, planner.UpdateInput{
+		Table:      "video_tag",
+		SetClauses: setClauses,
+		Where:      whereClause,
+	})
+	if err != nil {
+		return nil, err
+	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
 		return nil, err
@@ -6358,17 +6450,21 @@ type VideoTagUpdateMany struct {
 func UpdateManyVideoTag(ctx context.Context, db bom.Querier, q VideoTagUpdateMany) (int64, error) {
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	setSQL, count := buildVideoTagUpdateSet(d, state, &q.Data)
+	setClauses, count := buildVideoTagUpdateSet(d, state, &q.Data)
 	if count == 0 {
 		return 0, fmt.Errorf("VideoTagUpdateMany requires at least one field to update")
 	}
-	whereClause := buildVideoTagWhere(d, "t0", state, q.Where)
+	whereClause := buildVideoTagWhere(d, "video_tag", state, q.Where)
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return 0, err
 	}
-	sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("video_tag"), setSQL)
-	if whereClause != "" {
-		sqlStr += " WHERE " + whereClause
+	sqlStr, err := planner.BuildUpdate(d, planner.UpdateInput{
+		Table:      "video_tag",
+		SetClauses: setClauses,
+		Where:      whereClause,
+	})
+	if err != nil {
+		return 0, err
 	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
@@ -6392,7 +6488,7 @@ func DeleteOneAuthor[T AuthorModel, U AuthorUnique](ctx context.Context, db bom.
 	}
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	alias := "t0"
+	alias := "author"
 	whereClause, err := buildAuthorUniquePredicate(d, alias, state, q.Where)
 	if err != nil {
 		return nil, err
@@ -6400,7 +6496,13 @@ func DeleteOneAuthor[T AuthorModel, U AuthorUnique](ctx context.Context, db bom.
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return nil, err
 	}
-	sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s", d.QuoteIdent("author"), whereClause)
+	sqlStr, err := planner.BuildDelete(d, planner.DeleteInput{
+		Table: "author",
+		Where: whereClause,
+	})
+	if err != nil {
+		return nil, err
+	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
 		return nil, err
@@ -6422,13 +6524,16 @@ type AuthorDeleteMany struct {
 func DeleteManyAuthor(ctx context.Context, db bom.Querier, q AuthorDeleteMany) (int64, error) {
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	whereClause := buildAuthorWhere(d, "t0", state, q.Where)
+	whereClause := buildAuthorWhere(d, "author", state, q.Where)
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return 0, err
 	}
-	sqlStr := fmt.Sprintf("DELETE FROM %s", d.QuoteIdent("author"))
-	if whereClause != "" {
-		sqlStr += " WHERE " + whereClause
+	sqlStr, err := planner.BuildDelete(d, planner.DeleteInput{
+		Table: "author",
+		Where: whereClause,
+	})
+	if err != nil {
+		return 0, err
 	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
@@ -6452,7 +6557,7 @@ func DeleteOneAuthorProfile[T AuthorProfileModel, U AuthorProfileUnique](ctx con
 	}
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	alias := "t0"
+	alias := "author_profile"
 	whereClause, err := buildAuthorProfileUniquePredicate(d, alias, state, q.Where)
 	if err != nil {
 		return nil, err
@@ -6460,7 +6565,13 @@ func DeleteOneAuthorProfile[T AuthorProfileModel, U AuthorProfileUnique](ctx con
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return nil, err
 	}
-	sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s", d.QuoteIdent("author_profile"), whereClause)
+	sqlStr, err := planner.BuildDelete(d, planner.DeleteInput{
+		Table: "author_profile",
+		Where: whereClause,
+	})
+	if err != nil {
+		return nil, err
+	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
 		return nil, err
@@ -6482,13 +6593,16 @@ type AuthorProfileDeleteMany struct {
 func DeleteManyAuthorProfile(ctx context.Context, db bom.Querier, q AuthorProfileDeleteMany) (int64, error) {
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	whereClause := buildAuthorProfileWhere(d, "t0", state, q.Where)
+	whereClause := buildAuthorProfileWhere(d, "author_profile", state, q.Where)
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return 0, err
 	}
-	sqlStr := fmt.Sprintf("DELETE FROM %s", d.QuoteIdent("author_profile"))
-	if whereClause != "" {
-		sqlStr += " WHERE " + whereClause
+	sqlStr, err := planner.BuildDelete(d, planner.DeleteInput{
+		Table: "author_profile",
+		Where: whereClause,
+	})
+	if err != nil {
+		return 0, err
 	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
@@ -6512,7 +6626,7 @@ func DeleteOneVideo[T VideoModel, U VideoUnique](ctx context.Context, db bom.Que
 	}
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	alias := "t0"
+	alias := "video"
 	whereClause, err := buildVideoUniquePredicate(d, alias, state, q.Where)
 	if err != nil {
 		return nil, err
@@ -6520,7 +6634,13 @@ func DeleteOneVideo[T VideoModel, U VideoUnique](ctx context.Context, db bom.Que
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return nil, err
 	}
-	sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s", d.QuoteIdent("video"), whereClause)
+	sqlStr, err := planner.BuildDelete(d, planner.DeleteInput{
+		Table: "video",
+		Where: whereClause,
+	})
+	if err != nil {
+		return nil, err
+	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
 		return nil, err
@@ -6542,13 +6662,16 @@ type VideoDeleteMany struct {
 func DeleteManyVideo(ctx context.Context, db bom.Querier, q VideoDeleteMany) (int64, error) {
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	whereClause := buildVideoWhere(d, "t0", state, q.Where)
+	whereClause := buildVideoWhere(d, "video", state, q.Where)
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return 0, err
 	}
-	sqlStr := fmt.Sprintf("DELETE FROM %s", d.QuoteIdent("video"))
-	if whereClause != "" {
-		sqlStr += " WHERE " + whereClause
+	sqlStr, err := planner.BuildDelete(d, planner.DeleteInput{
+		Table: "video",
+		Where: whereClause,
+	})
+	if err != nil {
+		return 0, err
 	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
@@ -6572,7 +6695,7 @@ func DeleteOneComment[T CommentModel, U CommentUnique](ctx context.Context, db b
 	}
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	alias := "t0"
+	alias := "comment"
 	whereClause, err := buildCommentUniquePredicate(d, alias, state, q.Where)
 	if err != nil {
 		return nil, err
@@ -6580,7 +6703,13 @@ func DeleteOneComment[T CommentModel, U CommentUnique](ctx context.Context, db b
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return nil, err
 	}
-	sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s", d.QuoteIdent("comment"), whereClause)
+	sqlStr, err := planner.BuildDelete(d, planner.DeleteInput{
+		Table: "comment",
+		Where: whereClause,
+	})
+	if err != nil {
+		return nil, err
+	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
 		return nil, err
@@ -6602,13 +6731,16 @@ type CommentDeleteMany struct {
 func DeleteManyComment(ctx context.Context, db bom.Querier, q CommentDeleteMany) (int64, error) {
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	whereClause := buildCommentWhere(d, "t0", state, q.Where)
+	whereClause := buildCommentWhere(d, "comment", state, q.Where)
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return 0, err
 	}
-	sqlStr := fmt.Sprintf("DELETE FROM %s", d.QuoteIdent("comment"))
-	if whereClause != "" {
-		sqlStr += " WHERE " + whereClause
+	sqlStr, err := planner.BuildDelete(d, planner.DeleteInput{
+		Table: "comment",
+		Where: whereClause,
+	})
+	if err != nil {
+		return 0, err
 	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
@@ -6632,7 +6764,7 @@ func DeleteOneTag[T TagModel, U TagUnique](ctx context.Context, db bom.Querier, 
 	}
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	alias := "t0"
+	alias := "tag"
 	whereClause, err := buildTagUniquePredicate(d, alias, state, q.Where)
 	if err != nil {
 		return nil, err
@@ -6640,7 +6772,13 @@ func DeleteOneTag[T TagModel, U TagUnique](ctx context.Context, db bom.Querier, 
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return nil, err
 	}
-	sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s", d.QuoteIdent("tag"), whereClause)
+	sqlStr, err := planner.BuildDelete(d, planner.DeleteInput{
+		Table: "tag",
+		Where: whereClause,
+	})
+	if err != nil {
+		return nil, err
+	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
 		return nil, err
@@ -6662,13 +6800,16 @@ type TagDeleteMany struct {
 func DeleteManyTag(ctx context.Context, db bom.Querier, q TagDeleteMany) (int64, error) {
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	whereClause := buildTagWhere(d, "t0", state, q.Where)
+	whereClause := buildTagWhere(d, "tag", state, q.Where)
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return 0, err
 	}
-	sqlStr := fmt.Sprintf("DELETE FROM %s", d.QuoteIdent("tag"))
-	if whereClause != "" {
-		sqlStr += " WHERE " + whereClause
+	sqlStr, err := planner.BuildDelete(d, planner.DeleteInput{
+		Table: "tag",
+		Where: whereClause,
+	})
+	if err != nil {
+		return 0, err
 	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
@@ -6692,7 +6833,7 @@ func DeleteOneVideoTag[T VideoTagModel, U VideoTagUnique](ctx context.Context, d
 	}
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	alias := "t0"
+	alias := "video_tag"
 	whereClause, err := buildVideoTagUniquePredicate(d, alias, state, q.Where)
 	if err != nil {
 		return nil, err
@@ -6700,7 +6841,13 @@ func DeleteOneVideoTag[T VideoTagModel, U VideoTagUnique](ctx context.Context, d
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return nil, err
 	}
-	sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s", d.QuoteIdent("video_tag"), whereClause)
+	sqlStr, err := planner.BuildDelete(d, planner.DeleteInput{
+		Table: "video_tag",
+		Where: whereClause,
+	})
+	if err != nil {
+		return nil, err
+	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {
 		return nil, err
@@ -6722,13 +6869,16 @@ type VideoTagDeleteMany struct {
 func DeleteManyVideoTag(ctx context.Context, db bom.Querier, q VideoTagDeleteMany) (int64, error) {
 	d := dialectsqlite.New()
 	state := newArgState(d)
-	whereClause := buildVideoTagWhere(d, "t0", state, q.Where)
+	whereClause := buildVideoTagWhere(d, "video_tag", state, q.Where)
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return 0, err
 	}
-	sqlStr := fmt.Sprintf("DELETE FROM %s", d.QuoteIdent("video_tag"))
-	if whereClause != "" {
-		sqlStr += " WHERE " + whereClause
+	sqlStr, err := planner.BuildDelete(d, planner.DeleteInput{
+		Table: "video_tag",
+		Where: whereClause,
+	})
+	if err != nil {
+		return 0, err
 	}
 	res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
 	if err != nil {

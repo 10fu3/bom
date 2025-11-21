@@ -4,7 +4,7 @@ Bom は Prisma 互換の入力モデルを Go 構造体で表現する軽量 ORM
 
 ## 主な特徴
 - **Prisma と同じ概念**：`Where` / `OrderBy` / `Select` / `Distinct` / `Take` / `Skip` / ネストしたリレーション / `CreateOne` / `CreateMany` の入力を構造体で記述。
-- **読み書きサポート**：`FindMany` / `FindFirst` / `FindUnique` に加え、ネストした `CreateOne` / `CreateMany` (AUTO_INCREMENT / UUIDv4/v7 / ULID / CUID 自動採番) と `UpdateOne` / `UpdateMany` / `DeleteOne` / `DeleteMany` を安全に実行。
+- **読み書きサポート**：`FindMany` / `FindFirst` / `FindUnique` に加え、ネストした `CreateOne` / `CreateMany` (AUTO_INCREMENT / UUIDv4/v7 / ULID / CUID 自動採番) と `UpdateOne` / `UpdateMany` / `DeleteOne` / `DeleteMany` を安全に実行。すべての書き込みは Dialect 対応のミューテーションプランナー経由で生成し、識別子引用や `RETURNING` 対応を自動調整します。
 - **型安全なユニーク検索**：ユニーク制約ごとに専用構造体 + インターフェースを生成するため、誤ったキーで `FindUnique` を呼べません。
 - **Dialect 抽象化**：識別子の引用・プレースホルダ・JSON 集計・ILIKE/LcLike・`DISTINCT ON` などの差分を `pkg/dialect/*` が担当。
 - **スキーマ駆動コード生成**：DDL→AST→IR→アソシエーション解決→Go テンプレートというパイプラインで `pkg/generated` を構築。
@@ -135,6 +135,7 @@ go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
 ## 安全性とパフォーマンス
 - 値はすべて `argState` でプレースホルダ化され、SQL 文字列へ直接連結されません。
 |- カラム・テーブル名は列挙型 + Dialect の `QuoteIdent` で必ずエスケープされ、ORDER BY / DISTINCT でも安全です。
+- INSERT/UPDATE/DELETE 文は共有プランナーで生成し、識別子の引用と `RETURNING` サポートの有無を Dialect ごとに切り替えます。
 - JSON キーは生成時にサニタイズし、各 Dialect の `JSON_OBJECT` 系 API を使用します。
 - `FindMany` ではサブクエリ＋ `JSON_ARRAYAGG` で結果を 1 レコードにまとめる方式を採用しており、アプリ側で配列展開するだけで済みます。
 
