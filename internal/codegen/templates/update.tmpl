@@ -9,9 +9,9 @@ type {{ .ModelName }}UpdateData struct {
   {{- end }}
 }
 
-func build{{ .ModelName }}UpdateSet(d dialect.Dialect, state *argState, data *{{ .ModelName }}UpdateData) (string, int) {
+func build{{ .ModelName }}UpdateSet(d dialect.Dialect, state *argState, data *{{ .ModelName }}UpdateData) ([]string, int) {
   if data == nil {
-    return "", 0
+    return nil, 0
   }
   var parts []string
   {{- range .Columns }}
@@ -19,7 +19,7 @@ func build{{ .ModelName }}UpdateSet(d dialect.Dialect, state *argState, data *{{
     parts = append(parts, fmt.Sprintf("%s = %s", d.QuoteIdent("{{ .Name }}"), state.Add(data.{{ .Camel }}.Value())))
   }
   {{- end }}
-  return strings.Join(parts, ", "), len(parts)
+  return parts, len(parts)
 }
 
 {{- if .UniqueConstraints }}
@@ -32,11 +32,11 @@ type {{ .ModelName }}Update[U {{ .ModelName }}Unique] struct {
 func UpdateOne{{ .ModelName }}[T {{ .ModelName }}Model, U {{ .ModelName }}Unique](ctx context.Context, db bom.Querier, q {{ .ModelName }}Update[U]) (*T, error) {
   d := {{ $.DialectInit }}
   state := newArgState(d)
-  setSQL, count := build{{ .ModelName }}UpdateSet(d, state, &q.Data)
+  setClauses, count := build{{ .ModelName }}UpdateSet(d, state, &q.Data)
   if count == 0 {
     return nil, fmt.Errorf("{{ .ModelName }}Update requires at least one field to update")
   }
-  alias := "t0"
+  alias := "{{ .TableName }}"
   whereClause, err := build{{ .ModelName }}UniquePredicate(d, alias, state, q.Where)
   if err != nil {
     return nil, err
@@ -44,7 +44,14 @@ func UpdateOne{{ .ModelName }}[T {{ .ModelName }}Model, U {{ .ModelName }}Unique
   if err := ensureParamLimit(d, len(state.Args())); err != nil {
     return nil, err
   }
-  sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.QuoteIdent("{{ .TableName }}"), setSQL, whereClause)
+  sqlStr, err := planner.BuildUpdate(d, planner.UpdateInput{
+    Table:      "{{ .TableName }}",
+    SetClauses: setClauses,
+    Where:      whereClause,
+  })
+  if err != nil {
+    return nil, err
+  }
   res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
   if err != nil {
     return nil, err
@@ -92,17 +99,21 @@ type {{ .ModelName }}UpdateMany struct {
 func UpdateMany{{ .ModelName }}(ctx context.Context, db bom.Querier, q {{ .ModelName }}UpdateMany) (int64, error) {
   d := {{ $.DialectInit }}
   state := newArgState(d)
-  setSQL, count := build{{ .ModelName }}UpdateSet(d, state, &q.Data)
+  setClauses, count := build{{ .ModelName }}UpdateSet(d, state, &q.Data)
   if count == 0 {
     return 0, fmt.Errorf("{{ .ModelName }}UpdateMany requires at least one field to update")
   }
-  whereClause := build{{ .ModelName }}Where(d, "t0", state, q.Where)
+  whereClause := build{{ .ModelName }}Where(d, "{{ .TableName }}", state, q.Where)
   if err := ensureParamLimit(d, len(state.Args())); err != nil {
     return 0, err
   }
-  sqlStr := fmt.Sprintf("UPDATE %s SET %s", d.QuoteIdent("{{ .TableName }}"), setSQL)
-  if whereClause != "" {
-    sqlStr += " WHERE " + whereClause
+  sqlStr, err := planner.BuildUpdate(d, planner.UpdateInput{
+    Table:      "{{ .TableName }}",
+    SetClauses: setClauses,
+    Where:      whereClause,
+  })
+  if err != nil {
+    return 0, err
   }
   res, err := db.ExecContext(ctx, sqlStr, state.Args()...)
   if err != nil {

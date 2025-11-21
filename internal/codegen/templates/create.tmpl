@@ -91,7 +91,7 @@ func create{{ .ModelName }}Record(ctx context.Context, db bom.Querier, d dialect
 	{{- range .Columns }}
 	if data.{{ .Camel }}.IsSome() {
 		val := data.{{ .Camel }}.Value()
-		columns = append(columns, d.QuoteIdent("{{ .Name }}"))
+		columns = append(columns, "{{ .Name }}")
 		placeholders = append(placeholders, state.Add(val))
 	} else {
 		{{- if .Identity }}
@@ -103,7 +103,7 @@ func create{{ .ModelName }}Record(ctx context.Context, db bom.Querier, d dialect
 			return err
 		}
 		data.{{ .Camel }} = opt.OVal(genVal)
-		columns = append(columns, d.QuoteIdent("{{ .Name }}"))
+		columns = append(columns, "{{ .Name }}")
 		placeholders = append(placeholders, state.Add(genVal))
 		{{- else if .AutoIncrement }}
 		wantsAuto{{ .Camel }} = true
@@ -113,7 +113,11 @@ func create{{ .ModelName }}Record(ctx context.Context, db bom.Querier, d dialect
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
 		return err
 	}
-	sqlStr := buildInsertSQL(d, "{{ $table }}", columns, placeholders)
+	insertInput := planner.InsertInput{
+		Table:   "{{ $table }}",
+		Columns: columns,
+		Values:  placeholders,
+	}
 	autoCount := 0
 	{{- range .Columns }}
 	if wantsAuto{{ .Camel }} {
@@ -126,12 +130,16 @@ func create{{ .ModelName }}Record(ctx context.Context, db bom.Querier, d dialect
 		var returningCols []string
 		{{- range .Columns }}
 		if wantsAuto{{ .Camel }} {
-			returningCols = append(returningCols, d.QuoteIdent("{{ .Name }}"))
+			returningCols = append(returningCols, "{{ .Name }}")
 		}
 		{{- end }}
 		if len(returningCols) > 0 {
-			sqlStr = sqlStr + " RETURNING " + strings.Join(returningCols, ", ")
+			insertInput.Returning = returningCols
 		}
+	}
+	sqlStr, err := planner.BuildInsert(d, insertInput)
+	if err != nil {
+		return err
 	}
 	if returning {
 		rows, err := db.QueryContext(ctx, sqlStr, state.Args()...)
