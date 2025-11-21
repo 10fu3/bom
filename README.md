@@ -4,7 +4,7 @@ Bom is a Go-first ORM that mirrors Prisma’s object style while preserving idio
 
 ## Highlights
 - **Prisma-compatible inputs** – `Where`, `OrderBy`, `Select`, `Distinct`, `Take/Skip`, nested relations, and now `CreateOne` data all expressed as plain Go structs (no fluent chaining).
-- **Typed reads, creates, updates, and deletes** – generated helpers cover `FindMany`, `FindFirst`, `FindUnique`, Prisma-style `CreateOne`/`CreateMany`, typed `UpdateOne`/`UpdateMany`, and `DeleteOne`/`DeleteMany` helpers with reselectable unique keys and filters.
+- **Typed reads, creates, updates, and deletes** – generated helpers cover `FindMany`, `FindFirst`, `FindUnique`, Prisma-style `CreateOne`/`CreateMany`, typed `UpdateOne`/`UpdateMany`, and `DeleteOne`/`DeleteMany` helpers with reselectable unique keys and filters. All writes flow through a dialect-aware mutation planner so quoting, placeholder counts, and `RETURNING` support remain consistent across MySQL/PostgreSQL/SQLite.
 - **Type-safe uniques** – each unique constraint gets its own struct plus a sum-type-style interface so `FindUnique` can only be called with supported keys.
 - **Dialect abstraction** – common interface for quoting, placeholders, JSON aggregation, case-insensitive LIKE, and `DISTINCT ON`. The generator wires in MySQL, PostgreSQL, or SQLite behavior without touching your application code.
 - **Schema-driven codegen** – `schema.sql` + `bom.yml` flow through a DDL parser, association resolver, planner, and Go template set to emit everything under `pkg/generated`.
@@ -157,6 +157,7 @@ go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
 ## Safety and performance
 - All user inputs are converted into argument placeholders (`?`, `$1`, etc.) via `argState`, so SQL strings never contain interpolated values.
 - Identifier names (columns, tables, aliases) are generated enums and always quoted, removing injection vectors in ORDER BY/DISTINCT clauses.
+- Mutation statements (INSERT/UPDATE/DELETE) are rendered via a shared planner that quotes identifiers and only appends `RETURNING` when the dialect supports it.
 - JSON shape building uses dialect-specific functions and escapes JSON keys up front.
 - Queries can run as raw SELECTs or can wrap results into a top-level JSON array (for `FindMany` pagination helpers) without reflection.
 
