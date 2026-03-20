@@ -1,4 +1,4 @@
-package dialect
+package planner
 
 // Strategy encodes how the dialect handles case-insensitive comparisons.
 type Strategy int

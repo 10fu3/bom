@@ -3,12 +3,10 @@ package planner
 import (
 	"strings"
 	"testing"
-
-	"bom/pkg/dialect/mysql"
 )
 
 func TestBuildFindManyBasic(t *testing.T) {
-	d := mysql.New()
+	d := newMySQLDialect()
 	limit := int64(5)
 	input := FindManyInput{
 		Table: "video",
@@ -37,7 +35,7 @@ func TestBuildFindManyBasic(t *testing.T) {
 }
 
 func TestBuildFindManyDistinctOnFallback(t *testing.T) {
-	d := mysql.New()
+	d := newMySQLDialect()
 	input := FindManyInput{
 		Table: "author",
 		Alias: "a0",
@@ -56,7 +54,7 @@ func TestBuildFindManyDistinctOnFallback(t *testing.T) {
 }
 
 func TestBuildFindManyJSONArray(t *testing.T) {
-	d := mysql.New()
+	d := newMySQLDialect()
 	input := FindManyInput{
 		Table: "video",
 		Alias: "t0",
@@ -70,6 +68,48 @@ func TestBuildFindManyJSONArray(t *testing.T) {
 		t.Fatalf("build failed: %v", err)
 	}
 	expect := "SELECT COALESCE(JSON_ARRAYAGG(`r`.`__bom_json`), JSON_ARRAY()) AS `__bom_json` FROM (SELECT t0.`id` AS `__bom_json` FROM `video` AS `t0`) AS `r`"
+	if sql != expect {
+		t.Fatalf("unexpected sql:\n got %s\nwant %s", sql, expect)
+	}
+}
+
+func TestBuildFindManyJSONArrayPostgres(t *testing.T) {
+	d := newPostgresDialect()
+	input := FindManyInput{
+		Table: "video",
+		Alias: "t0",
+		Projections: []Projection{
+			{Expr: `"t0"."id"`, Alias: "__bom_json"},
+		},
+		JSONArray: true,
+	}
+	sql, _, err := BuildFindMany(d, input)
+	if err != nil {
+		t.Fatalf("build failed: %v", err)
+	}
+	expect := `SELECT (COALESCE(JSON_AGG("r"."__bom_json"), '[]'::json))::json AS "__bom_json" FROM LATERAL (SELECT "t0"."id" AS "__bom_json" FROM "video" AS "t0") AS "r"`
+	if sql != expect {
+		t.Fatalf("unexpected sql:\n got %s\nwant %s", sql, expect)
+	}
+}
+
+func TestBuildFindManyWithJoin(t *testing.T) {
+	d := newPostgresDialect()
+	input := FindManyInput{
+		Table: "author",
+		Alias: "t0",
+		Projections: []Projection{
+			{Expr: `"t0"."id"`, Alias: "id"},
+		},
+		Joins: []string{
+			`LEFT JOIN LATERAL (SELECT 1 AS "__bom_json") AS "j0" ON true`,
+		},
+	}
+	sql, _, err := BuildFindMany(d, input)
+	if err != nil {
+		t.Fatalf("build failed: %v", err)
+	}
+	expect := `SELECT "t0"."id" AS "id" FROM "author" AS "t0" LEFT JOIN LATERAL (SELECT 1 AS "__bom_json") AS "j0" ON true`
 	if sql != expect {
 		t.Fatalf("unexpected sql:\n got %s\nwant %s", sql, expect)
 	}

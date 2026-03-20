@@ -3,8 +3,6 @@ package planner
 import (
 	"fmt"
 	"strings"
-
-	"bom/pkg/dialect"
 )
 
 // InsertInput describes an INSERT statement.
@@ -16,7 +14,7 @@ type InsertInput struct {
 }
 
 // BuildInsert renders an INSERT statement for the given input.
-func BuildInsert(d dialect.Dialect, in InsertInput) (string, error) {
+func BuildInsert(d Dialect, in InsertInput) (string, error) {
 	if in.Table == "" {
 		return "", fmt.Errorf("insert: table required")
 	}
@@ -68,7 +66,7 @@ type UpdateInput struct {
 }
 
 // BuildUpdate renders an UPDATE statement for the given input.
-func BuildUpdate(d dialect.Dialect, in UpdateInput) (string, error) {
+func BuildUpdate(d Dialect, in UpdateInput) (string, error) {
 	if in.Table == "" {
 		return "", fmt.Errorf("update: table required")
 	}
@@ -94,7 +92,7 @@ type DeleteInput struct {
 }
 
 // BuildDelete renders a DELETE statement for the given input.
-func BuildDelete(d dialect.Dialect, in DeleteInput) (string, error) {
+func BuildDelete(d Dialect, in DeleteInput) (string, error) {
 	if in.Table == "" {
 		return "", fmt.Errorf("delete: table required")
 	}
