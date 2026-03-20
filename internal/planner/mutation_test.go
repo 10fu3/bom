@@ -1,14 +1,9 @@
 package planner
 
-import (
-	"testing"
-
-	"bom/pkg/dialect/mysql"
-	"bom/pkg/dialect/postgres"
-)
+import "testing"
 
 func TestBuildInsertBasic(t *testing.T) {
-	d := mysql.New()
+	d := newMySQLDialect()
 	sql, err := BuildInsert(d, InsertInput{
 		Table:   "video",
 		Columns: []string{"id", "title"},
@@ -24,7 +19,7 @@ func TestBuildInsertBasic(t *testing.T) {
 }
 
 func TestBuildInsertReturning(t *testing.T) {
-	d := postgres.New()
+	d := newPostgresDialect()
 	sql, err := BuildInsert(d, InsertInput{
 		Table:     "author",
 		Columns:   []string{"id"},
@@ -41,7 +36,7 @@ func TestBuildInsertReturning(t *testing.T) {
 }
 
 func TestBuildInsertDefaultValues(t *testing.T) {
-	d := postgres.New()
+	d := newPostgresDialect()
 	sql, err := BuildInsert(d, InsertInput{Table: "tag"})
 	if err != nil {
 		t.Fatalf("build failed: %v", err)
@@ -53,7 +48,7 @@ func TestBuildInsertDefaultValues(t *testing.T) {
 }
 
 func TestBuildUpdate(t *testing.T) {
-	d := mysql.New()
+	d := newMySQLDialect()
 	sql, err := BuildUpdate(d, UpdateInput{
 		Table:      "video",
 		SetClauses: []string{"`title` = ?"},
@@ -69,7 +64,7 @@ func TestBuildUpdate(t *testing.T) {
 }
 
 func TestBuildDelete(t *testing.T) {
-	d := mysql.New()
+	d := newMySQLDialect()
 	sql, err := BuildDelete(d, DeleteInput{
 		Table: "video",
 		Where: "`id` = ?",

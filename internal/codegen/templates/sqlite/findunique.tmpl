@@ -1,0 +1,83 @@
+{{ define "findunique" }}
+{{ range .Tables }}
+{{- if .UniqueConstraints }}
+type {{ .ModelName }}Unique interface {
+	{{ .UniqueInterface }}
+}
+
+{{ range .UniqueConstraints }}
+type {{ .TypeName }} struct {
+	{{- range .Fields }}
+	{{ .Camel }} {{ .GoType }}
+	{{- end }}
+}
+{{ end }}
+
+type {{ .ModelName }}FindUnique[U {{ .ModelName }}Unique] struct {
+	Where  U
+	Select {{ .ModelName }}Select
+}
+
+func build{{ .ModelName }}UniquePredicate[U {{ .ModelName }}Unique](d planner.Dialect, alias string, args *argState, where U) (string, error) {
+	w := newWhereBuilder(d, alias, args)
+	switch v := any(where).(type) {
+	{{- range .UniqueConstraints }}
+	case {{ .TypeName }}:
+		return build{{ .TypeName }}Predicate(w, v), nil
+	{{- end }}
+	default:
+		return "", fmt.Errorf("unsupported unique type %T", where)
+	}
+}
+
+{{ range .UniqueConstraints }}
+func build{{ .TypeName }}Predicate(w *whereBuilder, where {{ .TypeName }}) string {
+	var preds []string
+	{{- range .Fields }}
+	preds = append(preds, w.eq("{{ .ColumnName }}", where.{{ .Camel }}))
+	{{- end }}
+	return w.combineAnd(preds)
+}
+{{ end }}
+
+func FindUnique{{ .ModelName }}[T {{ .ModelName }}Model, U {{ .ModelName }}Unique](ctx context.Context, db bom.Querier, q {{ .ModelName }}FindUnique[U]) (*T, error) {
+	d := dialectInstance
+	state := newArgState(d)
+	alias := "t0"
+	whereClause, err := build{{ .ModelName }}UniquePredicate(d, alias, state, q.Where)
+	if err != nil {
+		return nil, err
+	}
+	jsonExpr, joins, err := build{{ .ModelName }}JSONExpr(d, alias, state, q.Select)
+	if err != nil {
+		return nil, err
+	}
+	jsonExpr = wrapJSONValue(d, jsonExpr)
+	if err := ensureParamLimit(d, len(state.Args())); err != nil {
+		return nil, err
+	}
+	input := planner.FindManyInput{
+		Table: "{{ .TableName }}",
+		Alias: alias,
+		Projections: []planner.Projection{
+			{Expr: jsonExpr, Alias: "__bom_json"},
+		},
+		Joins: joins,
+		Where: whereClause,
+		Args:  state.Args(),
+		Limit: one(),
+	}
+	rows, err := query{{ .ModelName }}Rows[T](ctx, db, d, input, false)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, sql.ErrNoRows
+	}
+	out := rows[0]
+	return &out, nil
+}
+
+{{- end }}
+{{ end }}
+{{ end }}

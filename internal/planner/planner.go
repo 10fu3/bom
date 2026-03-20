@@ -3,8 +3,6 @@ package planner
 import (
 	"fmt"
 	"strings"
-
-	"bom/pkg/dialect"
 )
 
 // Projection represents a single SELECT expression and optional alias.
@@ -18,6 +16,7 @@ type FindManyInput struct {
 	Table       string
 	Alias       string
 	Projections []Projection
+	Joins       []string
 	Distinct    []string
 	Where       string
 	Args        []any
@@ -28,7 +27,7 @@ type FindManyInput struct {
 }
 
 // BuildFindMany builds a SQL statement for the supplied input tuple.
-func BuildFindMany(d dialect.Dialect, in FindManyInput) (string, []any, error) {
+func BuildFindMany(d Dialect, in FindManyInput) (string, []any, error) {
 	if in.Table == "" {
 		return "", nil, fmt.Errorf("table name required")
 	}
@@ -63,6 +62,13 @@ func BuildFindMany(d dialect.Dialect, in FindManyInput) (string, []any, error) {
 	base.WriteString(d.QuoteIdent(in.Table))
 	base.WriteString(" AS ")
 	base.WriteString(d.QuoteIdent(alias))
+	for _, join := range in.Joins {
+		if strings.TrimSpace(join) == "" {
+			continue
+		}
+		base.WriteString(" ")
+		base.WriteString(join)
+	}
 	if in.Where != "" {
 		base.WriteString(" WHERE ")
 		base.WriteString(in.Where)
@@ -82,6 +88,10 @@ func BuildFindMany(d dialect.Dialect, in FindManyInput) (string, []any, error) {
 	jsonCol := fmt.Sprintf("%s.%s", d.QuoteIdent("r"), d.QuoteIdent("__bom_json"))
 	aggExpr := d.CoalesceJSONAgg(d.JSONArrayAgg(jsonCol), d.JSONArrayEmpty())
 	aggExpr = d.JSONValue(aggExpr)
-	agg := fmt.Sprintf("SELECT %s AS %s FROM (%s) AS %s", aggExpr, d.QuoteIdent("__bom_json"), sqlStr, d.QuoteIdent("r"))
+	fromFmt := "SELECT %s AS %s FROM (%s) AS %s"
+	if d.Name() == "postgres" {
+		fromFmt = "SELECT %s AS %s FROM LATERAL (%s) AS %s"
+	}
+	agg := fmt.Sprintf(fromFmt, aggExpr, d.QuoteIdent("__bom_json"), sqlStr, d.QuoteIdent("r"))
 	return agg, in.Args, nil
 }

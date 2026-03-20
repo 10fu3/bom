@@ -14,12 +14,12 @@ import (
 	"bom/internal/schema"
 )
 
-//go:embed templates/*.tmpl
+//go:embed templates/*.tmpl templates/*/*.tmpl
 var templatesFS embed.FS
 
 // Generator produces Go code for the resolved schema.
 type Generator struct {
-	tmpl *template.Template
+	funcs template.FuncMap
 }
 
 // New returns a generator configured with built-in templates.
@@ -29,9 +29,7 @@ func New() *Generator {
 		"lowerFirst": lowerFirst,
 		"castInt64":  func(goType, value string) string { return castInt64(goType, value) },
 	}
-	return &Generator{
-		tmpl: template.Must(template.New("root").Funcs(funcs).ParseFS(templatesFS, "templates/*.tmpl")),
-	}
+	return &Generator{funcs: funcs}
 }
 
 // Generate renders the templated {model,inputs,aliases} artifacts into outDir.
@@ -47,21 +45,19 @@ func (g *Generator) Generate(ir schema.IR, outDir string, dialectName string) er
 	if err != nil {
 		return err
 	}
+	tmpl, err := g.parseTemplates(dialectInfo.TemplateDir)
+	if err != nil {
+		return err
+	}
 
 	data := struct {
-		Tables             []tableData
-		DialectImportPath  string
-		DialectImportAlias string
-		DialectInit        string
+		Tables []tableData
 	}{
-		Tables:             buildTables(ir),
-		DialectImportPath:  dialectInfo.ImportPath,
-		DialectImportAlias: dialectInfo.ImportAlias,
-		DialectInit:        dialectInfo.Constructor,
+		Tables: buildTables(ir),
 	}
 
 	var buf bytes.Buffer
-	if err := g.tmpl.ExecuteTemplate(&buf, "root", data); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "root", data); err != nil {
 		return err
 	}
 	src, err := format.Source(buf.Bytes())
@@ -69,6 +65,15 @@ func (g *Generator) Generate(ir schema.IR, outDir string, dialectName string) er
 		return fmt.Errorf("format generated code: %w", err)
 	}
 	return os.WriteFile(filepath.Join(outDir, "generated.go"), src, 0o644)
+}
+
+func (g *Generator) parseTemplates(dialectDir string) (*template.Template, error) {
+	files := []string{"templates/*.tmpl"}
+	if dialectDir != "" {
+		files = append(files, fmt.Sprintf("templates/%s/*.tmpl", dialectDir))
+	}
+	tmpl := template.New("root").Funcs(g.funcs)
+	return tmpl.ParseFS(templatesFS, files...)
 }
 
 type tableData struct {
@@ -120,27 +125,19 @@ type inheritedKey struct {
 }
 
 type dialectInfo struct {
-	ImportPath  string
-	ImportAlias string
-	Constructor string
+	TemplateDir string
 }
 
 func resolveDialect(name string) (dialectInfo, error) {
 	dialects := map[string]dialectInfo{
 		"mysql": {
-			ImportPath:  "bom/pkg/dialect/mysql",
-			ImportAlias: "dialectmysql",
-			Constructor: "dialectmysql.New()",
+			TemplateDir: "mysql",
 		},
 		"postgres": {
-			ImportPath:  "bom/pkg/dialect/postgres",
-			ImportAlias: "dialectpostgres",
-			Constructor: "dialectpostgres.New()",
+			TemplateDir: "postgres",
 		},
 		"sqlite": {
-			ImportPath:  "bom/pkg/dialect/sqlite",
-			ImportAlias: "dialectsqlite",
-			Constructor: "dialectsqlite.New()",
+			TemplateDir: "sqlite",
 		},
 	}
 	key := strings.ToLower(strings.TrimSpace(name))

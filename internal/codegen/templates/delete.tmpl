@@ -14,7 +14,7 @@ func DeleteOne{{ .ModelName }}[T {{ .ModelName }}Model, U {{ .ModelName }}Unique
   if err != nil {
     return nil, err
   }
-  d := {{ $.DialectInit }}
+  d := dialectInstance
   state := newArgState(d)
   alias := "{{ .TableName }}"
   whereClause, err := build{{ .ModelName }}UniquePredicate(d, alias, state, q.Where)
@@ -51,7 +51,7 @@ type {{ .ModelName }}DeleteMany struct {
 }
 
 func DeleteMany{{ .ModelName }}(ctx context.Context, db bom.Querier, q {{ .ModelName }}DeleteMany) (int64, error) {
-  d := {{ $.DialectInit }}
+  d := dialectInstance
   state := newArgState(d)
   whereClause := build{{ .ModelName }}Where(d, "{{ .TableName }}", state, q.Where)
   if err := ensureParamLimit(d, len(state.Args())); err != nil {
