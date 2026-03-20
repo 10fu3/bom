@@ -11,8 +11,6 @@ import (
 
 	"bom/internal/planner"
 	"bom/pkg/bom"
-	"bom/pkg/dialect"
-	dialectsqlite "bom/pkg/dialect/sqlite"
 	"bom/pkg/opt"
 )
 
@@ -24,12 +22,12 @@ const (
 )
 
 type argState struct {
-	d    dialect.Dialect
+	d    planner.Dialect
 	next int
 	args []any
 }
 
-func newArgState(d dialect.Dialect) *argState {
+func newArgState(d planner.Dialect) *argState {
 	return &argState{d: d}
 }
 
@@ -44,12 +42,12 @@ func (s *argState) Args() []any {
 }
 
 type whereBuilder struct {
-	d     dialect.Dialect
+	d     planner.Dialect
 	alias string
 	args  *argState
 }
 
-func newWhereBuilder(d dialect.Dialect, alias string, args *argState) *whereBuilder {
+func newWhereBuilder(d planner.Dialect, alias string, args *argState) *whereBuilder {
 	return &whereBuilder{d: d, alias: alias, args: args}
 }
 
@@ -88,7 +86,7 @@ func (w *whereBuilder) combineOr(preds []string) string {
 	return w.d.Or(preds...)
 }
 
-func columnEquals(d dialect.Dialect, leftAlias, leftCol, rightAlias, rightCol string) string {
+func columnEquals(d planner.Dialect, leftAlias, leftCol, rightAlias, rightCol string) string {
 	return fmt.Sprintf("%s.%s = %s.%s", d.QuoteIdent(leftAlias), d.QuoteIdent(leftCol), d.QuoteIdent(rightAlias), d.QuoteIdent(rightCol))
 }
 
@@ -107,7 +105,7 @@ func normalizeJSONRaw(raw json.RawMessage) json.RawMessage {
 	return raw
 }
 
-func wrapJSONValue(d dialect.Dialect, expr string) string {
+func wrapJSONValue(d planner.Dialect, expr string) string {
 	if expr == "" {
 		return expr
 	}
@@ -128,15 +126,86 @@ func one() *int64 {
 }
 
 var identityGenerator bom.IdentityGenerator = &bom.DefaultIdentityGenerator{}
+var dialectInstance planner.Dialect = sqliteDialect{}
 
-func maxParameters(d dialect.Dialect) int {
+type sqliteDialect struct{}
+
+func (sqliteDialect) Name() string { return "sqlite" }
+
+func (sqliteDialect) Cap() planner.Capabilities {
+	return planner.Capabilities{
+		DistinctOn:      false,
+		CaseInsensitive: planner.CollateCI,
+		Placeholder:     "?",
+		InsertReturning: false,
+		MaxParameters:   999,
+	}
+}
+
+func (sqliteDialect) QuoteIdent(id string) string {
+	return `"` + strings.ReplaceAll(id, `"`, `""`) + `"`
+}
+
+func (sqliteDialect) Placeholder(int) string { return "?" }
+
+func (sqliteDialect) Eq(l, r string) string { return fmt.Sprintf("%s = %s", l, r) }
+func (sqliteDialect) And(preds ...string) string {
+	return "(" + strings.Join(preds, " AND ") + ")"
+}
+func (sqliteDialect) Or(preds ...string) string {
+	return "(" + strings.Join(preds, " OR ") + ")"
+}
+func (sqliteDialect) Not(pred string) string { return fmt.Sprintf("NOT (%s)", pred) }
+
+func (sqliteDialect) InsensitiveLike(lhs, ph string) string {
+	return fmt.Sprintf("%s LIKE %s COLLATE NOCASE", lhs, ph)
+}
+
+func (sqliteDialect) JSONBuildObject(pairs ...string) string {
+	return fmt.Sprintf("json_object(%s)", strings.Join(pairs, ", "))
+}
+
+func (sqliteDialect) JSONArrayAgg(expr string) string {
+	return fmt.Sprintf("json_group_array(%s)", expr)
+}
+
+func (sqliteDialect) JSONArrayEmpty() string {
+	return "json('[]')"
+}
+
+func (sqliteDialect) CoalesceJSONAgg(expr, empty string) string {
+	return fmt.Sprintf("COALESCE(%s, %s)", expr, empty)
+}
+
+func (sqliteDialect) JSONValue(expr string) string {
+	return fmt.Sprintf("json(%s)", expr)
+}
+
+func (sqliteDialect) LimitOffset(limit, offset *int64) string {
+	switch {
+	case limit == nil && offset == nil:
+		return ""
+	case limit != nil && offset != nil:
+		return fmt.Sprintf("LIMIT %d OFFSET %d", *limit, *offset)
+	case limit != nil:
+		return fmt.Sprintf("LIMIT %d", *limit)
+	default:
+		return fmt.Sprintf("OFFSET %d", *offset)
+	}
+}
+
+func (sqliteDialect) DistinctProjection(cols []string) (string, bool) {
+	return "", false
+}
+
+func maxParameters(d planner.Dialect) int {
 	if cap := d.Cap().MaxParameters; cap > 0 {
 		return cap
 	}
 	return math.MaxInt
 }
 
-func ensureParamLimit(d dialect.Dialect, count int) error {
+func ensureParamLimit(d planner.Dialect, count int) error {
 	if count == 0 {
 		return nil
 	}
@@ -299,7 +368,7 @@ type AuthorFindFirst struct {
 	Select  AuthorSelect
 }
 
-func buildAuthorWhere(d dialect.Dialect, alias string, args *argState, where *AuthorWhereInput) string {
+func buildAuthorWhere(d planner.Dialect, alias string, args *argState, where *AuthorWhereInput) string {
 	if where == nil {
 		return ""
 	}
@@ -357,7 +426,7 @@ func buildAuthorWherePredicates(w *whereBuilder, where *AuthorWhereInput) string
 	}
 	return w.combineAnd(preds)
 }
-func buildAuthorAuthorProfileRelation(d dialect.Dialect, parentAlias string, args *argState, rel *AuthorAuthorProfileRelation) string {
+func buildAuthorAuthorProfileRelation(d planner.Dialect, parentAlias string, args *argState, rel *AuthorAuthorProfileRelation) string {
 	if rel == nil {
 		return ""
 	}
@@ -386,7 +455,7 @@ func buildAuthorAuthorProfileRelation(d dialect.Dialect, parentAlias string, arg
 	return d.And(preds...)
 }
 
-func buildAuthorAuthorProfileRelationExists(d dialect.Dialect, parentAlias string, args *argState, where *AuthorProfileWhereInput, negate bool) string {
+func buildAuthorAuthorProfileRelationExists(d planner.Dialect, parentAlias string, args *argState, where *AuthorProfileWhereInput, negate bool) string {
 	childAlias := parentAlias + "_authorProfile"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("author_profile"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -412,7 +481,7 @@ func buildAuthorAuthorProfileRelationExists(d dialect.Dialect, parentAlias strin
 	return fmt.Sprintf("EXISTS (%s)", expr)
 }
 
-func buildAuthorAuthorProfileRelationEvery(d dialect.Dialect, parentAlias string, args *argState, where *AuthorProfileWhereInput) string {
+func buildAuthorAuthorProfileRelationEvery(d planner.Dialect, parentAlias string, args *argState, where *AuthorProfileWhereInput) string {
 	childAlias := parentAlias + "_authorProfile" + "_every"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("author_profile"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -430,7 +499,7 @@ func buildAuthorAuthorProfileRelationEvery(d dialect.Dialect, parentAlias string
 	combined = append(combined, negated)
 	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE %s)", tableRef, strings.Join(combined, " AND "))
 }
-func buildAuthorCommentRelation(d dialect.Dialect, parentAlias string, args *argState, rel *AuthorCommentRelation) string {
+func buildAuthorCommentRelation(d planner.Dialect, parentAlias string, args *argState, rel *AuthorCommentRelation) string {
 	if rel == nil {
 		return ""
 	}
@@ -459,7 +528,7 @@ func buildAuthorCommentRelation(d dialect.Dialect, parentAlias string, args *arg
 	return d.And(preds...)
 }
 
-func buildAuthorCommentRelationExists(d dialect.Dialect, parentAlias string, args *argState, where *CommentWhereInput, negate bool) string {
+func buildAuthorCommentRelationExists(d planner.Dialect, parentAlias string, args *argState, where *CommentWhereInput, negate bool) string {
 	childAlias := parentAlias + "_comment"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("comment"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -485,7 +554,7 @@ func buildAuthorCommentRelationExists(d dialect.Dialect, parentAlias string, arg
 	return fmt.Sprintf("EXISTS (%s)", expr)
 }
 
-func buildAuthorCommentRelationEvery(d dialect.Dialect, parentAlias string, args *argState, where *CommentWhereInput) string {
+func buildAuthorCommentRelationEvery(d planner.Dialect, parentAlias string, args *argState, where *CommentWhereInput) string {
 	childAlias := parentAlias + "_comment" + "_every"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("comment"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -503,7 +572,7 @@ func buildAuthorCommentRelationEvery(d dialect.Dialect, parentAlias string, args
 	combined = append(combined, negated)
 	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE %s)", tableRef, strings.Join(combined, " AND "))
 }
-func buildAuthorVideoRelation(d dialect.Dialect, parentAlias string, args *argState, rel *AuthorVideoRelation) string {
+func buildAuthorVideoRelation(d planner.Dialect, parentAlias string, args *argState, rel *AuthorVideoRelation) string {
 	if rel == nil {
 		return ""
 	}
@@ -532,7 +601,7 @@ func buildAuthorVideoRelation(d dialect.Dialect, parentAlias string, args *argSt
 	return d.And(preds...)
 }
 
-func buildAuthorVideoRelationExists(d dialect.Dialect, parentAlias string, args *argState, where *VideoWhereInput, negate bool) string {
+func buildAuthorVideoRelationExists(d planner.Dialect, parentAlias string, args *argState, where *VideoWhereInput, negate bool) string {
 	childAlias := parentAlias + "_video"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("video"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -558,7 +627,7 @@ func buildAuthorVideoRelationExists(d dialect.Dialect, parentAlias string, args 
 	return fmt.Sprintf("EXISTS (%s)", expr)
 }
 
-func buildAuthorVideoRelationEvery(d dialect.Dialect, parentAlias string, args *argState, where *VideoWhereInput) string {
+func buildAuthorVideoRelationEvery(d planner.Dialect, parentAlias string, args *argState, where *VideoWhereInput) string {
 	childAlias := parentAlias + "_video" + "_every"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("video"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -577,7 +646,7 @@ func buildAuthorVideoRelationEvery(d dialect.Dialect, parentAlias string, args *
 	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE %s)", tableRef, strings.Join(combined, " AND "))
 }
 
-func buildAuthorWhereUnique(d dialect.Dialect, alias string, args *argState, where *AuthorWhereUniqueInput) string {
+func buildAuthorWhereUnique(d planner.Dialect, alias string, args *argState, where *AuthorWhereUniqueInput) string {
 	if where == nil {
 		return ""
 	}
@@ -589,7 +658,7 @@ func buildAuthorWhereUnique(d dialect.Dialect, alias string, args *argState, whe
 	return w.combineAnd(preds)
 }
 
-func buildAuthorOrderBy(d dialect.Dialect, alias string, order []AuthorOrderByInput) []string {
+func buildAuthorOrderBy(d planner.Dialect, alias string, order []AuthorOrderByInput) []string {
 	var cols []string
 	for _, o := range order {
 		if o.Field == "" {
@@ -604,7 +673,7 @@ func buildAuthorOrderBy(d dialect.Dialect, alias string, order []AuthorOrderByIn
 	return cols
 }
 
-func buildAuthorDistinct(d dialect.Dialect, alias string, distinct []AuthorField) []string {
+func buildAuthorDistinct(d planner.Dialect, alias string, distinct []AuthorField) []string {
 	var out []string
 	for _, field := range distinct {
 		if field == "" {
@@ -615,41 +684,51 @@ func buildAuthorDistinct(d dialect.Dialect, alias string, distinct []AuthorField
 	return out
 }
 
-func buildAuthorJSONExpr(d dialect.Dialect, alias string, args *argState, sel AuthorSelect) (string, error) {
+func buildAuthorJSONExpr(d planner.Dialect, alias string, args *argState, sel AuthorSelect) (string, []string, error) {
 	items := sel
 	includeAll := len(items) == 0
 	var pairs []string
+	var joins []string
 	if includeAll {
 		pairs = append(pairs, jsonPair("id", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("id"))))
 		pairs = append(pairs, jsonPair("name", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("name"))))
 		pairs = append(pairs, jsonPair("email", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("email"))))
 		pairs = append(pairs, jsonPair("created_at", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("created_at"))))
 		{
-			expr, err := buildAuthorAuthorProfileJSON(d, alias, args, &AuthorAuthorProfileSelectArgs{
+			expr, exprJoins, err := buildAuthorAuthorProfileJSON(d, alias, args, &AuthorAuthorProfileSelectArgs{
 				Select: AuthorProfileSelectAll,
 			})
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 			pairs = append(pairs, jsonPair("authorProfile", wrapJSONValue(d, expr)))
+			if len(exprJoins) > 0 {
+				joins = append(joins, exprJoins...)
+			}
 		}
 		{
-			expr, err := buildAuthorCommentJSON(d, alias, args, &AuthorCommentSelectArgs{
+			expr, exprJoins, err := buildAuthorCommentJSON(d, alias, args, &AuthorCommentSelectArgs{
 				Select: CommentSelectAll,
 			})
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 			pairs = append(pairs, jsonPair("comment", wrapJSONValue(d, expr)))
+			if len(exprJoins) > 0 {
+				joins = append(joins, exprJoins...)
+			}
 		}
 		{
-			expr, err := buildAuthorVideoJSON(d, alias, args, &AuthorVideoSelectArgs{
+			expr, exprJoins, err := buildAuthorVideoJSON(d, alias, args, &AuthorVideoSelectArgs{
 				Select: VideoSelectAll,
 			})
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 			pairs = append(pairs, jsonPair("video", wrapJSONValue(d, expr)))
+			if len(exprJoins) > 0 {
+				joins = append(joins, exprJoins...)
+			}
 		}
 	} else {
 		seen := make(map[AuthorField]struct{})
@@ -671,11 +750,14 @@ func buildAuthorJSONExpr(d dialect.Dialect, alias string, args *argState, sel Au
 				}
 				relationSeen["AuthorProfile"] = struct{}{}
 				{
-					expr, err := buildAuthorAuthorProfileJSON(d, alias, args, &v.Args)
+					expr, exprJoins, err := buildAuthorAuthorProfileJSON(d, alias, args, &v.Args)
 					if err != nil {
-						return "", err
+						return "", nil, err
 					}
 					pairs = append(pairs, jsonPair("authorProfile", wrapJSONValue(d, expr)))
+					if len(exprJoins) > 0 {
+						joins = append(joins, exprJoins...)
+					}
 				}
 			case AuthorSelectComment:
 				if _, ok := relationSeen["Comment"]; ok {
@@ -683,11 +765,14 @@ func buildAuthorJSONExpr(d dialect.Dialect, alias string, args *argState, sel Au
 				}
 				relationSeen["Comment"] = struct{}{}
 				{
-					expr, err := buildAuthorCommentJSON(d, alias, args, &v.Args)
+					expr, exprJoins, err := buildAuthorCommentJSON(d, alias, args, &v.Args)
 					if err != nil {
-						return "", err
+						return "", nil, err
 					}
 					pairs = append(pairs, jsonPair("comment", wrapJSONValue(d, expr)))
+					if len(exprJoins) > 0 {
+						joins = append(joins, exprJoins...)
+					}
 				}
 			case AuthorSelectVideo:
 				if _, ok := relationSeen["Video"]; ok {
@@ -695,11 +780,14 @@ func buildAuthorJSONExpr(d dialect.Dialect, alias string, args *argState, sel Au
 				}
 				relationSeen["Video"] = struct{}{}
 				{
-					expr, err := buildAuthorVideoJSON(d, alias, args, &v.Args)
+					expr, exprJoins, err := buildAuthorVideoJSON(d, alias, args, &v.Args)
 					if err != nil {
-						return "", err
+						return "", nil, err
 					}
 					pairs = append(pairs, jsonPair("video", wrapJSONValue(d, expr)))
+					if len(exprJoins) > 0 {
+						joins = append(joins, exprJoins...)
+					}
 				}
 			}
 		}
@@ -707,16 +795,16 @@ func buildAuthorJSONExpr(d dialect.Dialect, alias string, args *argState, sel Au
 	if len(pairs) == 0 {
 		pairs = append(pairs, jsonPair("id", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("id"))))
 	}
-	return d.JSONBuildObject(pairs...), nil
+	return d.JSONBuildObject(pairs...), joins, nil
 }
-func buildAuthorAuthorProfileJSON(d dialect.Dialect, parentAlias string, args *argState, sel *AuthorAuthorProfileSelectArgs) (string, error) {
+func buildAuthorAuthorProfileJSON(d planner.Dialect, parentAlias string, args *argState, sel *AuthorAuthorProfileSelectArgs) (string, []string, error) {
 	if sel == nil {
 		sel = &AuthorAuthorProfileSelectArgs{}
 	}
 	childAlias := parentAlias + "_authorProfile"
-	childJSON, err := buildAuthorProfileJSONExpr(d, childAlias, args, sel.Select)
+	childJSON, childJoins, err := buildAuthorProfileJSONExpr(d, childAlias, args, sel.Select)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	childJSON = wrapJSONValue(d, childJSON)
 	joinConds := make([]string, 0, 1)
@@ -729,18 +817,22 @@ func buildAuthorAuthorProfileJSON(d dialect.Dialect, parentAlias string, args *a
 		whereSQL = " WHERE " + whereClause
 	}
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("author_profile"), d.QuoteIdent(childAlias))
-	expr := fmt.Sprintf("(SELECT %s FROM %s%s", childJSON, tableRef, whereSQL)
+	var childJoinSQL string
+	if len(childJoins) > 0 {
+		childJoinSQL = " " + strings.Join(childJoins, " ")
+	}
+	expr := fmt.Sprintf("(SELECT %s FROM %s%s%s", childJSON, tableRef, childJoinSQL, whereSQL)
 	expr += ")"
-	return expr, nil
+	return expr, nil, nil
 }
-func buildAuthorCommentJSON(d dialect.Dialect, parentAlias string, args *argState, sel *AuthorCommentSelectArgs) (string, error) {
+func buildAuthorCommentJSON(d planner.Dialect, parentAlias string, args *argState, sel *AuthorCommentSelectArgs) (string, []string, error) {
 	if sel == nil {
 		sel = &AuthorCommentSelectArgs{}
 	}
 	childAlias := parentAlias + "_comment"
-	childJSON, err := buildCommentJSONExpr(d, childAlias, args, sel.Select)
+	childJSON, childJoins, err := buildCommentJSONExpr(d, childAlias, args, sel.Select)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	childJSON = wrapJSONValue(d, childJSON)
 	joinConds := make([]string, 0, 1)
@@ -769,22 +861,26 @@ func buildAuthorCommentJSON(d dialect.Dialect, parentAlias string, args *argStat
 	offset := convertOpt(sel.Skip)
 	lo = d.LimitOffset(limit, offset)
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("comment"), d.QuoteIdent(childAlias))
-	arrayExpr := d.JSONArrayAgg(childJSON)
-	expr := fmt.Sprintf("(SELECT %s FROM %s%s%s", d.CoalesceJSONAgg(arrayExpr, d.JSONArrayEmpty()), tableRef, whereSQL, orderSQL)
-	if lo != "" {
-		expr += " " + lo
+	var childJoinSQL string
+	if len(childJoins) > 0 {
+		childJoinSQL = " " + strings.Join(childJoins, " ")
 	}
-	expr += ")"
-	return expr, nil
+	arrayExpr := d.JSONArrayAgg(childJSON)
+	subquery := fmt.Sprintf("SELECT %s AS %s FROM %s%s%s%s", d.CoalesceJSONAgg(arrayExpr, d.JSONArrayEmpty()), d.QuoteIdent("__bom_json"), tableRef, childJoinSQL, whereSQL, orderSQL)
+	if lo != "" {
+		subquery += " " + lo
+	}
+	expr := fmt.Sprintf("(%s)", subquery)
+	return expr, nil, nil
 }
-func buildAuthorVideoJSON(d dialect.Dialect, parentAlias string, args *argState, sel *AuthorVideoSelectArgs) (string, error) {
+func buildAuthorVideoJSON(d planner.Dialect, parentAlias string, args *argState, sel *AuthorVideoSelectArgs) (string, []string, error) {
 	if sel == nil {
 		sel = &AuthorVideoSelectArgs{}
 	}
 	childAlias := parentAlias + "_video"
-	childJSON, err := buildVideoJSONExpr(d, childAlias, args, sel.Select)
+	childJSON, childJoins, err := buildVideoJSONExpr(d, childAlias, args, sel.Select)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	childJSON = wrapJSONValue(d, childJSON)
 	joinConds := make([]string, 0, 1)
@@ -813,20 +909,24 @@ func buildAuthorVideoJSON(d dialect.Dialect, parentAlias string, args *argState,
 	offset := convertOpt(sel.Skip)
 	lo = d.LimitOffset(limit, offset)
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("video"), d.QuoteIdent(childAlias))
-	arrayExpr := d.JSONArrayAgg(childJSON)
-	expr := fmt.Sprintf("(SELECT %s FROM %s%s%s", d.CoalesceJSONAgg(arrayExpr, d.JSONArrayEmpty()), tableRef, whereSQL, orderSQL)
-	if lo != "" {
-		expr += " " + lo
+	var childJoinSQL string
+	if len(childJoins) > 0 {
+		childJoinSQL = " " + strings.Join(childJoins, " ")
 	}
-	expr += ")"
-	return expr, nil
+	arrayExpr := d.JSONArrayAgg(childJSON)
+	subquery := fmt.Sprintf("SELECT %s AS %s FROM %s%s%s%s", d.CoalesceJSONAgg(arrayExpr, d.JSONArrayEmpty()), d.QuoteIdent("__bom_json"), tableRef, childJoinSQL, whereSQL, orderSQL)
+	if lo != "" {
+		subquery += " " + lo
+	}
+	expr := fmt.Sprintf("(%s)", subquery)
+	return expr, nil, nil
 }
 
 func FindManyAuthor[T AuthorModel](ctx context.Context, db bom.Querier, q AuthorFindMany) ([]T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	rootAlias := "t0"
-	jsonExpr, err := buildAuthorJSONExpr(d, rootAlias, state, q.Select)
+	jsonExpr, joins, err := buildAuthorJSONExpr(d, rootAlias, state, q.Select)
 	if err != nil {
 		return nil, err
 	}
@@ -841,6 +941,7 @@ func FindManyAuthor[T AuthorModel](ctx context.Context, db bom.Querier, q Author
 		Projections: []planner.Projection{
 			{Expr: jsonExpr, Alias: "__bom_json"},
 		},
+		Joins:     joins,
 		Where:     whereClause,
 		Args:      state.Args(),
 		OrderBy:   buildAuthorOrderBy(d, rootAlias, q.OrderBy),
@@ -871,7 +972,7 @@ func FindFirstAuthor[T AuthorModel](ctx context.Context, db bom.Querier, q Autho
 	return &out, nil
 }
 
-func queryAuthorRows[T AuthorModel](ctx context.Context, db bom.Querier, d dialect.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
+func queryAuthorRows[T AuthorModel](ctx context.Context, db bom.Querier, d planner.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
 	sqlStr, args, err := planner.BuildFindMany(d, input)
 	if err != nil {
 		return nil, err
@@ -1034,7 +1135,7 @@ type AuthorProfileFindFirst struct {
 	Select  AuthorProfileSelect
 }
 
-func buildAuthorProfileWhere(d dialect.Dialect, alias string, args *argState, where *AuthorProfileWhereInput) string {
+func buildAuthorProfileWhere(d planner.Dialect, alias string, args *argState, where *AuthorProfileWhereInput) string {
 	if where == nil {
 		return ""
 	}
@@ -1085,7 +1186,7 @@ func buildAuthorProfileWherePredicates(w *whereBuilder, where *AuthorProfileWher
 	}
 	return w.combineAnd(preds)
 }
-func buildAuthorProfileAuthorRelation(d dialect.Dialect, parentAlias string, args *argState, rel *AuthorProfileAuthorRelation) string {
+func buildAuthorProfileAuthorRelation(d planner.Dialect, parentAlias string, args *argState, rel *AuthorProfileAuthorRelation) string {
 	if rel == nil {
 		return ""
 	}
@@ -1114,7 +1215,7 @@ func buildAuthorProfileAuthorRelation(d dialect.Dialect, parentAlias string, arg
 	return d.And(preds...)
 }
 
-func buildAuthorProfileAuthorRelationExists(d dialect.Dialect, parentAlias string, args *argState, where *AuthorWhereInput, negate bool) string {
+func buildAuthorProfileAuthorRelationExists(d planner.Dialect, parentAlias string, args *argState, where *AuthorWhereInput, negate bool) string {
 	childAlias := parentAlias + "_author"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("author"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -1140,7 +1241,7 @@ func buildAuthorProfileAuthorRelationExists(d dialect.Dialect, parentAlias strin
 	return fmt.Sprintf("EXISTS (%s)", expr)
 }
 
-func buildAuthorProfileAuthorRelationEvery(d dialect.Dialect, parentAlias string, args *argState, where *AuthorWhereInput) string {
+func buildAuthorProfileAuthorRelationEvery(d planner.Dialect, parentAlias string, args *argState, where *AuthorWhereInput) string {
 	childAlias := parentAlias + "_author" + "_every"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("author"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -1159,7 +1260,7 @@ func buildAuthorProfileAuthorRelationEvery(d dialect.Dialect, parentAlias string
 	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE %s)", tableRef, strings.Join(combined, " AND "))
 }
 
-func buildAuthorProfileWhereUnique(d dialect.Dialect, alias string, args *argState, where *AuthorProfileWhereUniqueInput) string {
+func buildAuthorProfileWhereUnique(d planner.Dialect, alias string, args *argState, where *AuthorProfileWhereUniqueInput) string {
 	if where == nil {
 		return ""
 	}
@@ -1171,7 +1272,7 @@ func buildAuthorProfileWhereUnique(d dialect.Dialect, alias string, args *argSta
 	return w.combineAnd(preds)
 }
 
-func buildAuthorProfileOrderBy(d dialect.Dialect, alias string, order []AuthorProfileOrderByInput) []string {
+func buildAuthorProfileOrderBy(d planner.Dialect, alias string, order []AuthorProfileOrderByInput) []string {
 	var cols []string
 	for _, o := range order {
 		if o.Field == "" {
@@ -1186,7 +1287,7 @@ func buildAuthorProfileOrderBy(d dialect.Dialect, alias string, order []AuthorPr
 	return cols
 }
 
-func buildAuthorProfileDistinct(d dialect.Dialect, alias string, distinct []AuthorProfileField) []string {
+func buildAuthorProfileDistinct(d planner.Dialect, alias string, distinct []AuthorProfileField) []string {
 	var out []string
 	for _, field := range distinct {
 		if field == "" {
@@ -1197,10 +1298,11 @@ func buildAuthorProfileDistinct(d dialect.Dialect, alias string, distinct []Auth
 	return out
 }
 
-func buildAuthorProfileJSONExpr(d dialect.Dialect, alias string, args *argState, sel AuthorProfileSelect) (string, error) {
+func buildAuthorProfileJSONExpr(d planner.Dialect, alias string, args *argState, sel AuthorProfileSelect) (string, []string, error) {
 	items := sel
 	includeAll := len(items) == 0
 	var pairs []string
+	var joins []string
 	if includeAll {
 		pairs = append(pairs, jsonPair("id", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("id"))))
 		pairs = append(pairs, jsonPair("author_id", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("author_id"))))
@@ -1208,13 +1310,16 @@ func buildAuthorProfileJSONExpr(d dialect.Dialect, alias string, args *argState,
 		pairs = append(pairs, jsonPair("avatar_url", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("avatar_url"))))
 		pairs = append(pairs, jsonPair("created_at", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("created_at"))))
 		{
-			expr, err := buildAuthorProfileAuthorJSON(d, alias, args, &AuthorProfileAuthorSelectArgs{
+			expr, exprJoins, err := buildAuthorProfileAuthorJSON(d, alias, args, &AuthorProfileAuthorSelectArgs{
 				Select: AuthorSelectAll,
 			})
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 			pairs = append(pairs, jsonPair("author", wrapJSONValue(d, expr)))
+			if len(exprJoins) > 0 {
+				joins = append(joins, exprJoins...)
+			}
 		}
 	} else {
 		seen := make(map[AuthorProfileField]struct{})
@@ -1236,11 +1341,14 @@ func buildAuthorProfileJSONExpr(d dialect.Dialect, alias string, args *argState,
 				}
 				relationSeen["Author"] = struct{}{}
 				{
-					expr, err := buildAuthorProfileAuthorJSON(d, alias, args, &v.Args)
+					expr, exprJoins, err := buildAuthorProfileAuthorJSON(d, alias, args, &v.Args)
 					if err != nil {
-						return "", err
+						return "", nil, err
 					}
 					pairs = append(pairs, jsonPair("author", wrapJSONValue(d, expr)))
+					if len(exprJoins) > 0 {
+						joins = append(joins, exprJoins...)
+					}
 				}
 			}
 		}
@@ -1248,16 +1356,16 @@ func buildAuthorProfileJSONExpr(d dialect.Dialect, alias string, args *argState,
 	if len(pairs) == 0 {
 		pairs = append(pairs, jsonPair("id", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("id"))))
 	}
-	return d.JSONBuildObject(pairs...), nil
+	return d.JSONBuildObject(pairs...), joins, nil
 }
-func buildAuthorProfileAuthorJSON(d dialect.Dialect, parentAlias string, args *argState, sel *AuthorProfileAuthorSelectArgs) (string, error) {
+func buildAuthorProfileAuthorJSON(d planner.Dialect, parentAlias string, args *argState, sel *AuthorProfileAuthorSelectArgs) (string, []string, error) {
 	if sel == nil {
 		sel = &AuthorProfileAuthorSelectArgs{}
 	}
 	childAlias := parentAlias + "_author"
-	childJSON, err := buildAuthorJSONExpr(d, childAlias, args, sel.Select)
+	childJSON, childJoins, err := buildAuthorJSONExpr(d, childAlias, args, sel.Select)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	childJSON = wrapJSONValue(d, childJSON)
 	joinConds := make([]string, 0, 1)
@@ -1270,16 +1378,20 @@ func buildAuthorProfileAuthorJSON(d dialect.Dialect, parentAlias string, args *a
 		whereSQL = " WHERE " + whereClause
 	}
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("author"), d.QuoteIdent(childAlias))
-	expr := fmt.Sprintf("(SELECT %s FROM %s%s", childJSON, tableRef, whereSQL)
+	var childJoinSQL string
+	if len(childJoins) > 0 {
+		childJoinSQL = " " + strings.Join(childJoins, " ")
+	}
+	expr := fmt.Sprintf("(SELECT %s FROM %s%s%s", childJSON, tableRef, childJoinSQL, whereSQL)
 	expr += ")"
-	return expr, nil
+	return expr, nil, nil
 }
 
 func FindManyAuthorProfile[T AuthorProfileModel](ctx context.Context, db bom.Querier, q AuthorProfileFindMany) ([]T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	rootAlias := "t0"
-	jsonExpr, err := buildAuthorProfileJSONExpr(d, rootAlias, state, q.Select)
+	jsonExpr, joins, err := buildAuthorProfileJSONExpr(d, rootAlias, state, q.Select)
 	if err != nil {
 		return nil, err
 	}
@@ -1294,6 +1406,7 @@ func FindManyAuthorProfile[T AuthorProfileModel](ctx context.Context, db bom.Que
 		Projections: []planner.Projection{
 			{Expr: jsonExpr, Alias: "__bom_json"},
 		},
+		Joins:     joins,
 		Where:     whereClause,
 		Args:      state.Args(),
 		OrderBy:   buildAuthorProfileOrderBy(d, rootAlias, q.OrderBy),
@@ -1324,7 +1437,7 @@ func FindFirstAuthorProfile[T AuthorProfileModel](ctx context.Context, db bom.Qu
 	return &out, nil
 }
 
-func queryAuthorProfileRows[T AuthorProfileModel](ctx context.Context, db bom.Querier, d dialect.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
+func queryAuthorProfileRows[T AuthorProfileModel](ctx context.Context, db bom.Querier, d planner.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
 	sqlStr, args, err := planner.BuildFindMany(d, input)
 	if err != nil {
 		return nil, err
@@ -1535,7 +1648,7 @@ type VideoFindFirst struct {
 	Select  VideoSelect
 }
 
-func buildVideoWhere(d dialect.Dialect, alias string, args *argState, where *VideoWhereInput) string {
+func buildVideoWhere(d planner.Dialect, alias string, args *argState, where *VideoWhereInput) string {
 	if where == nil {
 		return ""
 	}
@@ -1599,7 +1712,7 @@ func buildVideoWherePredicates(w *whereBuilder, where *VideoWhereInput) string {
 	}
 	return w.combineAnd(preds)
 }
-func buildVideoCommentRelation(d dialect.Dialect, parentAlias string, args *argState, rel *VideoCommentRelation) string {
+func buildVideoCommentRelation(d planner.Dialect, parentAlias string, args *argState, rel *VideoCommentRelation) string {
 	if rel == nil {
 		return ""
 	}
@@ -1628,7 +1741,7 @@ func buildVideoCommentRelation(d dialect.Dialect, parentAlias string, args *argS
 	return d.And(preds...)
 }
 
-func buildVideoCommentRelationExists(d dialect.Dialect, parentAlias string, args *argState, where *CommentWhereInput, negate bool) string {
+func buildVideoCommentRelationExists(d planner.Dialect, parentAlias string, args *argState, where *CommentWhereInput, negate bool) string {
 	childAlias := parentAlias + "_comment"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("comment"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -1654,7 +1767,7 @@ func buildVideoCommentRelationExists(d dialect.Dialect, parentAlias string, args
 	return fmt.Sprintf("EXISTS (%s)", expr)
 }
 
-func buildVideoCommentRelationEvery(d dialect.Dialect, parentAlias string, args *argState, where *CommentWhereInput) string {
+func buildVideoCommentRelationEvery(d planner.Dialect, parentAlias string, args *argState, where *CommentWhereInput) string {
 	childAlias := parentAlias + "_comment" + "_every"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("comment"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -1672,7 +1785,7 @@ func buildVideoCommentRelationEvery(d dialect.Dialect, parentAlias string, args 
 	combined = append(combined, negated)
 	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE %s)", tableRef, strings.Join(combined, " AND "))
 }
-func buildVideoVideoTagRelation(d dialect.Dialect, parentAlias string, args *argState, rel *VideoVideoTagRelation) string {
+func buildVideoVideoTagRelation(d planner.Dialect, parentAlias string, args *argState, rel *VideoVideoTagRelation) string {
 	if rel == nil {
 		return ""
 	}
@@ -1701,7 +1814,7 @@ func buildVideoVideoTagRelation(d dialect.Dialect, parentAlias string, args *arg
 	return d.And(preds...)
 }
 
-func buildVideoVideoTagRelationExists(d dialect.Dialect, parentAlias string, args *argState, where *VideoTagWhereInput, negate bool) string {
+func buildVideoVideoTagRelationExists(d planner.Dialect, parentAlias string, args *argState, where *VideoTagWhereInput, negate bool) string {
 	childAlias := parentAlias + "_videoTag"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("video_tag"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -1727,7 +1840,7 @@ func buildVideoVideoTagRelationExists(d dialect.Dialect, parentAlias string, arg
 	return fmt.Sprintf("EXISTS (%s)", expr)
 }
 
-func buildVideoVideoTagRelationEvery(d dialect.Dialect, parentAlias string, args *argState, where *VideoTagWhereInput) string {
+func buildVideoVideoTagRelationEvery(d planner.Dialect, parentAlias string, args *argState, where *VideoTagWhereInput) string {
 	childAlias := parentAlias + "_videoTag" + "_every"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("video_tag"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -1745,7 +1858,7 @@ func buildVideoVideoTagRelationEvery(d dialect.Dialect, parentAlias string, args
 	combined = append(combined, negated)
 	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE %s)", tableRef, strings.Join(combined, " AND "))
 }
-func buildVideoAuthorRelation(d dialect.Dialect, parentAlias string, args *argState, rel *VideoAuthorRelation) string {
+func buildVideoAuthorRelation(d planner.Dialect, parentAlias string, args *argState, rel *VideoAuthorRelation) string {
 	if rel == nil {
 		return ""
 	}
@@ -1774,7 +1887,7 @@ func buildVideoAuthorRelation(d dialect.Dialect, parentAlias string, args *argSt
 	return d.And(preds...)
 }
 
-func buildVideoAuthorRelationExists(d dialect.Dialect, parentAlias string, args *argState, where *AuthorWhereInput, negate bool) string {
+func buildVideoAuthorRelationExists(d planner.Dialect, parentAlias string, args *argState, where *AuthorWhereInput, negate bool) string {
 	childAlias := parentAlias + "_author"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("author"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -1800,7 +1913,7 @@ func buildVideoAuthorRelationExists(d dialect.Dialect, parentAlias string, args 
 	return fmt.Sprintf("EXISTS (%s)", expr)
 }
 
-func buildVideoAuthorRelationEvery(d dialect.Dialect, parentAlias string, args *argState, where *AuthorWhereInput) string {
+func buildVideoAuthorRelationEvery(d planner.Dialect, parentAlias string, args *argState, where *AuthorWhereInput) string {
 	childAlias := parentAlias + "_author" + "_every"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("author"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -1819,7 +1932,7 @@ func buildVideoAuthorRelationEvery(d dialect.Dialect, parentAlias string, args *
 	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE %s)", tableRef, strings.Join(combined, " AND "))
 }
 
-func buildVideoWhereUnique(d dialect.Dialect, alias string, args *argState, where *VideoWhereUniqueInput) string {
+func buildVideoWhereUnique(d planner.Dialect, alias string, args *argState, where *VideoWhereUniqueInput) string {
 	if where == nil {
 		return ""
 	}
@@ -1831,7 +1944,7 @@ func buildVideoWhereUnique(d dialect.Dialect, alias string, args *argState, wher
 	return w.combineAnd(preds)
 }
 
-func buildVideoOrderBy(d dialect.Dialect, alias string, order []VideoOrderByInput) []string {
+func buildVideoOrderBy(d planner.Dialect, alias string, order []VideoOrderByInput) []string {
 	var cols []string
 	for _, o := range order {
 		if o.Field == "" {
@@ -1846,7 +1959,7 @@ func buildVideoOrderBy(d dialect.Dialect, alias string, order []VideoOrderByInpu
 	return cols
 }
 
-func buildVideoDistinct(d dialect.Dialect, alias string, distinct []VideoField) []string {
+func buildVideoDistinct(d planner.Dialect, alias string, distinct []VideoField) []string {
 	var out []string
 	for _, field := range distinct {
 		if field == "" {
@@ -1857,10 +1970,11 @@ func buildVideoDistinct(d dialect.Dialect, alias string, distinct []VideoField) 
 	return out
 }
 
-func buildVideoJSONExpr(d dialect.Dialect, alias string, args *argState, sel VideoSelect) (string, error) {
+func buildVideoJSONExpr(d planner.Dialect, alias string, args *argState, sel VideoSelect) (string, []string, error) {
 	items := sel
 	includeAll := len(items) == 0
 	var pairs []string
+	var joins []string
 	if includeAll {
 		pairs = append(pairs, jsonPair("id", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("id"))))
 		pairs = append(pairs, jsonPair("title", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("title"))))
@@ -1869,31 +1983,40 @@ func buildVideoJSONExpr(d dialect.Dialect, alias string, args *argState, sel Vid
 		pairs = append(pairs, jsonPair("description", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("description"))))
 		pairs = append(pairs, jsonPair("created_at", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("created_at"))))
 		{
-			expr, err := buildVideoCommentJSON(d, alias, args, &VideoCommentSelectArgs{
+			expr, exprJoins, err := buildVideoCommentJSON(d, alias, args, &VideoCommentSelectArgs{
 				Select: CommentSelectAll,
 			})
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 			pairs = append(pairs, jsonPair("comment", wrapJSONValue(d, expr)))
+			if len(exprJoins) > 0 {
+				joins = append(joins, exprJoins...)
+			}
 		}
 		{
-			expr, err := buildVideoVideoTagJSON(d, alias, args, &VideoVideoTagSelectArgs{
+			expr, exprJoins, err := buildVideoVideoTagJSON(d, alias, args, &VideoVideoTagSelectArgs{
 				Select: VideoTagSelectAll,
 			})
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 			pairs = append(pairs, jsonPair("videoTag", wrapJSONValue(d, expr)))
+			if len(exprJoins) > 0 {
+				joins = append(joins, exprJoins...)
+			}
 		}
 		{
-			expr, err := buildVideoAuthorJSON(d, alias, args, &VideoAuthorSelectArgs{
+			expr, exprJoins, err := buildVideoAuthorJSON(d, alias, args, &VideoAuthorSelectArgs{
 				Select: AuthorSelectAll,
 			})
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 			pairs = append(pairs, jsonPair("author", wrapJSONValue(d, expr)))
+			if len(exprJoins) > 0 {
+				joins = append(joins, exprJoins...)
+			}
 		}
 	} else {
 		seen := make(map[VideoField]struct{})
@@ -1915,11 +2038,14 @@ func buildVideoJSONExpr(d dialect.Dialect, alias string, args *argState, sel Vid
 				}
 				relationSeen["Comment"] = struct{}{}
 				{
-					expr, err := buildVideoCommentJSON(d, alias, args, &v.Args)
+					expr, exprJoins, err := buildVideoCommentJSON(d, alias, args, &v.Args)
 					if err != nil {
-						return "", err
+						return "", nil, err
 					}
 					pairs = append(pairs, jsonPair("comment", wrapJSONValue(d, expr)))
+					if len(exprJoins) > 0 {
+						joins = append(joins, exprJoins...)
+					}
 				}
 			case VideoSelectVideoTag:
 				if _, ok := relationSeen["VideoTag"]; ok {
@@ -1927,11 +2053,14 @@ func buildVideoJSONExpr(d dialect.Dialect, alias string, args *argState, sel Vid
 				}
 				relationSeen["VideoTag"] = struct{}{}
 				{
-					expr, err := buildVideoVideoTagJSON(d, alias, args, &v.Args)
+					expr, exprJoins, err := buildVideoVideoTagJSON(d, alias, args, &v.Args)
 					if err != nil {
-						return "", err
+						return "", nil, err
 					}
 					pairs = append(pairs, jsonPair("videoTag", wrapJSONValue(d, expr)))
+					if len(exprJoins) > 0 {
+						joins = append(joins, exprJoins...)
+					}
 				}
 			case VideoSelectAuthor:
 				if _, ok := relationSeen["Author"]; ok {
@@ -1939,11 +2068,14 @@ func buildVideoJSONExpr(d dialect.Dialect, alias string, args *argState, sel Vid
 				}
 				relationSeen["Author"] = struct{}{}
 				{
-					expr, err := buildVideoAuthorJSON(d, alias, args, &v.Args)
+					expr, exprJoins, err := buildVideoAuthorJSON(d, alias, args, &v.Args)
 					if err != nil {
-						return "", err
+						return "", nil, err
 					}
 					pairs = append(pairs, jsonPair("author", wrapJSONValue(d, expr)))
+					if len(exprJoins) > 0 {
+						joins = append(joins, exprJoins...)
+					}
 				}
 			}
 		}
@@ -1951,16 +2083,16 @@ func buildVideoJSONExpr(d dialect.Dialect, alias string, args *argState, sel Vid
 	if len(pairs) == 0 {
 		pairs = append(pairs, jsonPair("id", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("id"))))
 	}
-	return d.JSONBuildObject(pairs...), nil
+	return d.JSONBuildObject(pairs...), joins, nil
 }
-func buildVideoCommentJSON(d dialect.Dialect, parentAlias string, args *argState, sel *VideoCommentSelectArgs) (string, error) {
+func buildVideoCommentJSON(d planner.Dialect, parentAlias string, args *argState, sel *VideoCommentSelectArgs) (string, []string, error) {
 	if sel == nil {
 		sel = &VideoCommentSelectArgs{}
 	}
 	childAlias := parentAlias + "_comment"
-	childJSON, err := buildCommentJSONExpr(d, childAlias, args, sel.Select)
+	childJSON, childJoins, err := buildCommentJSONExpr(d, childAlias, args, sel.Select)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	childJSON = wrapJSONValue(d, childJSON)
 	joinConds := make([]string, 0, 1)
@@ -1989,22 +2121,26 @@ func buildVideoCommentJSON(d dialect.Dialect, parentAlias string, args *argState
 	offset := convertOpt(sel.Skip)
 	lo = d.LimitOffset(limit, offset)
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("comment"), d.QuoteIdent(childAlias))
-	arrayExpr := d.JSONArrayAgg(childJSON)
-	expr := fmt.Sprintf("(SELECT %s FROM %s%s%s", d.CoalesceJSONAgg(arrayExpr, d.JSONArrayEmpty()), tableRef, whereSQL, orderSQL)
-	if lo != "" {
-		expr += " " + lo
+	var childJoinSQL string
+	if len(childJoins) > 0 {
+		childJoinSQL = " " + strings.Join(childJoins, " ")
 	}
-	expr += ")"
-	return expr, nil
+	arrayExpr := d.JSONArrayAgg(childJSON)
+	subquery := fmt.Sprintf("SELECT %s AS %s FROM %s%s%s%s", d.CoalesceJSONAgg(arrayExpr, d.JSONArrayEmpty()), d.QuoteIdent("__bom_json"), tableRef, childJoinSQL, whereSQL, orderSQL)
+	if lo != "" {
+		subquery += " " + lo
+	}
+	expr := fmt.Sprintf("(%s)", subquery)
+	return expr, nil, nil
 }
-func buildVideoVideoTagJSON(d dialect.Dialect, parentAlias string, args *argState, sel *VideoVideoTagSelectArgs) (string, error) {
+func buildVideoVideoTagJSON(d planner.Dialect, parentAlias string, args *argState, sel *VideoVideoTagSelectArgs) (string, []string, error) {
 	if sel == nil {
 		sel = &VideoVideoTagSelectArgs{}
 	}
 	childAlias := parentAlias + "_videoTag"
-	childJSON, err := buildVideoTagJSONExpr(d, childAlias, args, sel.Select)
+	childJSON, childJoins, err := buildVideoTagJSONExpr(d, childAlias, args, sel.Select)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	childJSON = wrapJSONValue(d, childJSON)
 	joinConds := make([]string, 0, 1)
@@ -2033,22 +2169,26 @@ func buildVideoVideoTagJSON(d dialect.Dialect, parentAlias string, args *argStat
 	offset := convertOpt(sel.Skip)
 	lo = d.LimitOffset(limit, offset)
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("video_tag"), d.QuoteIdent(childAlias))
-	arrayExpr := d.JSONArrayAgg(childJSON)
-	expr := fmt.Sprintf("(SELECT %s FROM %s%s%s", d.CoalesceJSONAgg(arrayExpr, d.JSONArrayEmpty()), tableRef, whereSQL, orderSQL)
-	if lo != "" {
-		expr += " " + lo
+	var childJoinSQL string
+	if len(childJoins) > 0 {
+		childJoinSQL = " " + strings.Join(childJoins, " ")
 	}
-	expr += ")"
-	return expr, nil
+	arrayExpr := d.JSONArrayAgg(childJSON)
+	subquery := fmt.Sprintf("SELECT %s AS %s FROM %s%s%s%s", d.CoalesceJSONAgg(arrayExpr, d.JSONArrayEmpty()), d.QuoteIdent("__bom_json"), tableRef, childJoinSQL, whereSQL, orderSQL)
+	if lo != "" {
+		subquery += " " + lo
+	}
+	expr := fmt.Sprintf("(%s)", subquery)
+	return expr, nil, nil
 }
-func buildVideoAuthorJSON(d dialect.Dialect, parentAlias string, args *argState, sel *VideoAuthorSelectArgs) (string, error) {
+func buildVideoAuthorJSON(d planner.Dialect, parentAlias string, args *argState, sel *VideoAuthorSelectArgs) (string, []string, error) {
 	if sel == nil {
 		sel = &VideoAuthorSelectArgs{}
 	}
 	childAlias := parentAlias + "_author"
-	childJSON, err := buildAuthorJSONExpr(d, childAlias, args, sel.Select)
+	childJSON, childJoins, err := buildAuthorJSONExpr(d, childAlias, args, sel.Select)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	childJSON = wrapJSONValue(d, childJSON)
 	joinConds := make([]string, 0, 1)
@@ -2061,16 +2201,20 @@ func buildVideoAuthorJSON(d dialect.Dialect, parentAlias string, args *argState,
 		whereSQL = " WHERE " + whereClause
 	}
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("author"), d.QuoteIdent(childAlias))
-	expr := fmt.Sprintf("(SELECT %s FROM %s%s", childJSON, tableRef, whereSQL)
+	var childJoinSQL string
+	if len(childJoins) > 0 {
+		childJoinSQL = " " + strings.Join(childJoins, " ")
+	}
+	expr := fmt.Sprintf("(SELECT %s FROM %s%s%s", childJSON, tableRef, childJoinSQL, whereSQL)
 	expr += ")"
-	return expr, nil
+	return expr, nil, nil
 }
 
 func FindManyVideo[T VideoModel](ctx context.Context, db bom.Querier, q VideoFindMany) ([]T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	rootAlias := "t0"
-	jsonExpr, err := buildVideoJSONExpr(d, rootAlias, state, q.Select)
+	jsonExpr, joins, err := buildVideoJSONExpr(d, rootAlias, state, q.Select)
 	if err != nil {
 		return nil, err
 	}
@@ -2085,6 +2229,7 @@ func FindManyVideo[T VideoModel](ctx context.Context, db bom.Querier, q VideoFin
 		Projections: []planner.Projection{
 			{Expr: jsonExpr, Alias: "__bom_json"},
 		},
+		Joins:     joins,
 		Where:     whereClause,
 		Args:      state.Args(),
 		OrderBy:   buildVideoOrderBy(d, rootAlias, q.OrderBy),
@@ -2115,7 +2260,7 @@ func FindFirstVideo[T VideoModel](ctx context.Context, db bom.Querier, q VideoFi
 	return &out, nil
 }
 
-func queryVideoRows[T VideoModel](ctx context.Context, db bom.Querier, d dialect.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
+func queryVideoRows[T VideoModel](ctx context.Context, db bom.Querier, d planner.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
 	sqlStr, args, err := planner.BuildFindMany(d, input)
 	if err != nil {
 		return nil, err
@@ -2295,7 +2440,7 @@ type CommentFindFirst struct {
 	Select  CommentSelect
 }
 
-func buildCommentWhere(d dialect.Dialect, alias string, args *argState, where *CommentWhereInput) string {
+func buildCommentWhere(d planner.Dialect, alias string, args *argState, where *CommentWhereInput) string {
 	if where == nil {
 		return ""
 	}
@@ -2351,7 +2496,7 @@ func buildCommentWherePredicates(w *whereBuilder, where *CommentWhereInput) stri
 	}
 	return w.combineAnd(preds)
 }
-func buildCommentVideoRelation(d dialect.Dialect, parentAlias string, args *argState, rel *CommentVideoRelation) string {
+func buildCommentVideoRelation(d planner.Dialect, parentAlias string, args *argState, rel *CommentVideoRelation) string {
 	if rel == nil {
 		return ""
 	}
@@ -2380,7 +2525,7 @@ func buildCommentVideoRelation(d dialect.Dialect, parentAlias string, args *argS
 	return d.And(preds...)
 }
 
-func buildCommentVideoRelationExists(d dialect.Dialect, parentAlias string, args *argState, where *VideoWhereInput, negate bool) string {
+func buildCommentVideoRelationExists(d planner.Dialect, parentAlias string, args *argState, where *VideoWhereInput, negate bool) string {
 	childAlias := parentAlias + "_video"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("video"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -2406,7 +2551,7 @@ func buildCommentVideoRelationExists(d dialect.Dialect, parentAlias string, args
 	return fmt.Sprintf("EXISTS (%s)", expr)
 }
 
-func buildCommentVideoRelationEvery(d dialect.Dialect, parentAlias string, args *argState, where *VideoWhereInput) string {
+func buildCommentVideoRelationEvery(d planner.Dialect, parentAlias string, args *argState, where *VideoWhereInput) string {
 	childAlias := parentAlias + "_video" + "_every"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("video"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -2424,7 +2569,7 @@ func buildCommentVideoRelationEvery(d dialect.Dialect, parentAlias string, args 
 	combined = append(combined, negated)
 	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE %s)", tableRef, strings.Join(combined, " AND "))
 }
-func buildCommentAuthorRelation(d dialect.Dialect, parentAlias string, args *argState, rel *CommentAuthorRelation) string {
+func buildCommentAuthorRelation(d planner.Dialect, parentAlias string, args *argState, rel *CommentAuthorRelation) string {
 	if rel == nil {
 		return ""
 	}
@@ -2453,7 +2598,7 @@ func buildCommentAuthorRelation(d dialect.Dialect, parentAlias string, args *arg
 	return d.And(preds...)
 }
 
-func buildCommentAuthorRelationExists(d dialect.Dialect, parentAlias string, args *argState, where *AuthorWhereInput, negate bool) string {
+func buildCommentAuthorRelationExists(d planner.Dialect, parentAlias string, args *argState, where *AuthorWhereInput, negate bool) string {
 	childAlias := parentAlias + "_author"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("author"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -2479,7 +2624,7 @@ func buildCommentAuthorRelationExists(d dialect.Dialect, parentAlias string, arg
 	return fmt.Sprintf("EXISTS (%s)", expr)
 }
 
-func buildCommentAuthorRelationEvery(d dialect.Dialect, parentAlias string, args *argState, where *AuthorWhereInput) string {
+func buildCommentAuthorRelationEvery(d planner.Dialect, parentAlias string, args *argState, where *AuthorWhereInput) string {
 	childAlias := parentAlias + "_author" + "_every"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("author"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -2498,7 +2643,7 @@ func buildCommentAuthorRelationEvery(d dialect.Dialect, parentAlias string, args
 	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE %s)", tableRef, strings.Join(combined, " AND "))
 }
 
-func buildCommentWhereUnique(d dialect.Dialect, alias string, args *argState, where *CommentWhereUniqueInput) string {
+func buildCommentWhereUnique(d planner.Dialect, alias string, args *argState, where *CommentWhereUniqueInput) string {
 	if where == nil {
 		return ""
 	}
@@ -2510,7 +2655,7 @@ func buildCommentWhereUnique(d dialect.Dialect, alias string, args *argState, wh
 	return w.combineAnd(preds)
 }
 
-func buildCommentOrderBy(d dialect.Dialect, alias string, order []CommentOrderByInput) []string {
+func buildCommentOrderBy(d planner.Dialect, alias string, order []CommentOrderByInput) []string {
 	var cols []string
 	for _, o := range order {
 		if o.Field == "" {
@@ -2525,7 +2670,7 @@ func buildCommentOrderBy(d dialect.Dialect, alias string, order []CommentOrderBy
 	return cols
 }
 
-func buildCommentDistinct(d dialect.Dialect, alias string, distinct []CommentField) []string {
+func buildCommentDistinct(d planner.Dialect, alias string, distinct []CommentField) []string {
 	var out []string
 	for _, field := range distinct {
 		if field == "" {
@@ -2536,10 +2681,11 @@ func buildCommentDistinct(d dialect.Dialect, alias string, distinct []CommentFie
 	return out
 }
 
-func buildCommentJSONExpr(d dialect.Dialect, alias string, args *argState, sel CommentSelect) (string, error) {
+func buildCommentJSONExpr(d planner.Dialect, alias string, args *argState, sel CommentSelect) (string, []string, error) {
 	items := sel
 	includeAll := len(items) == 0
 	var pairs []string
+	var joins []string
 	if includeAll {
 		pairs = append(pairs, jsonPair("id", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("id"))))
 		pairs = append(pairs, jsonPair("video_id", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("video_id"))))
@@ -2547,22 +2693,28 @@ func buildCommentJSONExpr(d dialect.Dialect, alias string, args *argState, sel C
 		pairs = append(pairs, jsonPair("body", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("body"))))
 		pairs = append(pairs, jsonPair("created_at", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("created_at"))))
 		{
-			expr, err := buildCommentVideoJSON(d, alias, args, &CommentVideoSelectArgs{
+			expr, exprJoins, err := buildCommentVideoJSON(d, alias, args, &CommentVideoSelectArgs{
 				Select: VideoSelectAll,
 			})
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 			pairs = append(pairs, jsonPair("video", wrapJSONValue(d, expr)))
+			if len(exprJoins) > 0 {
+				joins = append(joins, exprJoins...)
+			}
 		}
 		{
-			expr, err := buildCommentAuthorJSON(d, alias, args, &CommentAuthorSelectArgs{
+			expr, exprJoins, err := buildCommentAuthorJSON(d, alias, args, &CommentAuthorSelectArgs{
 				Select: AuthorSelectAll,
 			})
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 			pairs = append(pairs, jsonPair("author", wrapJSONValue(d, expr)))
+			if len(exprJoins) > 0 {
+				joins = append(joins, exprJoins...)
+			}
 		}
 	} else {
 		seen := make(map[CommentField]struct{})
@@ -2584,11 +2736,14 @@ func buildCommentJSONExpr(d dialect.Dialect, alias string, args *argState, sel C
 				}
 				relationSeen["Video"] = struct{}{}
 				{
-					expr, err := buildCommentVideoJSON(d, alias, args, &v.Args)
+					expr, exprJoins, err := buildCommentVideoJSON(d, alias, args, &v.Args)
 					if err != nil {
-						return "", err
+						return "", nil, err
 					}
 					pairs = append(pairs, jsonPair("video", wrapJSONValue(d, expr)))
+					if len(exprJoins) > 0 {
+						joins = append(joins, exprJoins...)
+					}
 				}
 			case CommentSelectAuthor:
 				if _, ok := relationSeen["Author"]; ok {
@@ -2596,11 +2751,14 @@ func buildCommentJSONExpr(d dialect.Dialect, alias string, args *argState, sel C
 				}
 				relationSeen["Author"] = struct{}{}
 				{
-					expr, err := buildCommentAuthorJSON(d, alias, args, &v.Args)
+					expr, exprJoins, err := buildCommentAuthorJSON(d, alias, args, &v.Args)
 					if err != nil {
-						return "", err
+						return "", nil, err
 					}
 					pairs = append(pairs, jsonPair("author", wrapJSONValue(d, expr)))
+					if len(exprJoins) > 0 {
+						joins = append(joins, exprJoins...)
+					}
 				}
 			}
 		}
@@ -2608,16 +2766,16 @@ func buildCommentJSONExpr(d dialect.Dialect, alias string, args *argState, sel C
 	if len(pairs) == 0 {
 		pairs = append(pairs, jsonPair("id", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("id"))))
 	}
-	return d.JSONBuildObject(pairs...), nil
+	return d.JSONBuildObject(pairs...), joins, nil
 }
-func buildCommentVideoJSON(d dialect.Dialect, parentAlias string, args *argState, sel *CommentVideoSelectArgs) (string, error) {
+func buildCommentVideoJSON(d planner.Dialect, parentAlias string, args *argState, sel *CommentVideoSelectArgs) (string, []string, error) {
 	if sel == nil {
 		sel = &CommentVideoSelectArgs{}
 	}
 	childAlias := parentAlias + "_video"
-	childJSON, err := buildVideoJSONExpr(d, childAlias, args, sel.Select)
+	childJSON, childJoins, err := buildVideoJSONExpr(d, childAlias, args, sel.Select)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	childJSON = wrapJSONValue(d, childJSON)
 	joinConds := make([]string, 0, 1)
@@ -2630,18 +2788,22 @@ func buildCommentVideoJSON(d dialect.Dialect, parentAlias string, args *argState
 		whereSQL = " WHERE " + whereClause
 	}
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("video"), d.QuoteIdent(childAlias))
-	expr := fmt.Sprintf("(SELECT %s FROM %s%s", childJSON, tableRef, whereSQL)
+	var childJoinSQL string
+	if len(childJoins) > 0 {
+		childJoinSQL = " " + strings.Join(childJoins, " ")
+	}
+	expr := fmt.Sprintf("(SELECT %s FROM %s%s%s", childJSON, tableRef, childJoinSQL, whereSQL)
 	expr += ")"
-	return expr, nil
+	return expr, nil, nil
 }
-func buildCommentAuthorJSON(d dialect.Dialect, parentAlias string, args *argState, sel *CommentAuthorSelectArgs) (string, error) {
+func buildCommentAuthorJSON(d planner.Dialect, parentAlias string, args *argState, sel *CommentAuthorSelectArgs) (string, []string, error) {
 	if sel == nil {
 		sel = &CommentAuthorSelectArgs{}
 	}
 	childAlias := parentAlias + "_author"
-	childJSON, err := buildAuthorJSONExpr(d, childAlias, args, sel.Select)
+	childJSON, childJoins, err := buildAuthorJSONExpr(d, childAlias, args, sel.Select)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	childJSON = wrapJSONValue(d, childJSON)
 	joinConds := make([]string, 0, 1)
@@ -2654,16 +2816,20 @@ func buildCommentAuthorJSON(d dialect.Dialect, parentAlias string, args *argStat
 		whereSQL = " WHERE " + whereClause
 	}
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("author"), d.QuoteIdent(childAlias))
-	expr := fmt.Sprintf("(SELECT %s FROM %s%s", childJSON, tableRef, whereSQL)
+	var childJoinSQL string
+	if len(childJoins) > 0 {
+		childJoinSQL = " " + strings.Join(childJoins, " ")
+	}
+	expr := fmt.Sprintf("(SELECT %s FROM %s%s%s", childJSON, tableRef, childJoinSQL, whereSQL)
 	expr += ")"
-	return expr, nil
+	return expr, nil, nil
 }
 
 func FindManyComment[T CommentModel](ctx context.Context, db bom.Querier, q CommentFindMany) ([]T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	rootAlias := "t0"
-	jsonExpr, err := buildCommentJSONExpr(d, rootAlias, state, q.Select)
+	jsonExpr, joins, err := buildCommentJSONExpr(d, rootAlias, state, q.Select)
 	if err != nil {
 		return nil, err
 	}
@@ -2678,6 +2844,7 @@ func FindManyComment[T CommentModel](ctx context.Context, db bom.Querier, q Comm
 		Projections: []planner.Projection{
 			{Expr: jsonExpr, Alias: "__bom_json"},
 		},
+		Joins:     joins,
 		Where:     whereClause,
 		Args:      state.Args(),
 		OrderBy:   buildCommentOrderBy(d, rootAlias, q.OrderBy),
@@ -2708,7 +2875,7 @@ func FindFirstComment[T CommentModel](ctx context.Context, db bom.Querier, q Com
 	return &out, nil
 }
 
-func queryCommentRows[T CommentModel](ctx context.Context, db bom.Querier, d dialect.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
+func queryCommentRows[T CommentModel](ctx context.Context, db bom.Querier, d planner.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
 	sqlStr, args, err := planner.BuildFindMany(d, input)
 	if err != nil {
 		return nil, err
@@ -2857,7 +3024,7 @@ type TagFindFirst struct {
 	Select  TagSelect
 }
 
-func buildTagWhere(d dialect.Dialect, alias string, args *argState, where *TagWhereInput) string {
+func buildTagWhere(d planner.Dialect, alias string, args *argState, where *TagWhereInput) string {
 	if where == nil {
 		return ""
 	}
@@ -2899,7 +3066,7 @@ func buildTagWherePredicates(w *whereBuilder, where *TagWhereInput) string {
 	}
 	return w.combineAnd(preds)
 }
-func buildTagVideoTagRelation(d dialect.Dialect, parentAlias string, args *argState, rel *TagVideoTagRelation) string {
+func buildTagVideoTagRelation(d planner.Dialect, parentAlias string, args *argState, rel *TagVideoTagRelation) string {
 	if rel == nil {
 		return ""
 	}
@@ -2928,7 +3095,7 @@ func buildTagVideoTagRelation(d dialect.Dialect, parentAlias string, args *argSt
 	return d.And(preds...)
 }
 
-func buildTagVideoTagRelationExists(d dialect.Dialect, parentAlias string, args *argState, where *VideoTagWhereInput, negate bool) string {
+func buildTagVideoTagRelationExists(d planner.Dialect, parentAlias string, args *argState, where *VideoTagWhereInput, negate bool) string {
 	childAlias := parentAlias + "_videoTag"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("video_tag"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -2954,7 +3121,7 @@ func buildTagVideoTagRelationExists(d dialect.Dialect, parentAlias string, args 
 	return fmt.Sprintf("EXISTS (%s)", expr)
 }
 
-func buildTagVideoTagRelationEvery(d dialect.Dialect, parentAlias string, args *argState, where *VideoTagWhereInput) string {
+func buildTagVideoTagRelationEvery(d planner.Dialect, parentAlias string, args *argState, where *VideoTagWhereInput) string {
 	childAlias := parentAlias + "_videoTag" + "_every"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("video_tag"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -2973,7 +3140,7 @@ func buildTagVideoTagRelationEvery(d dialect.Dialect, parentAlias string, args *
 	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE %s)", tableRef, strings.Join(combined, " AND "))
 }
 
-func buildTagWhereUnique(d dialect.Dialect, alias string, args *argState, where *TagWhereUniqueInput) string {
+func buildTagWhereUnique(d planner.Dialect, alias string, args *argState, where *TagWhereUniqueInput) string {
 	if where == nil {
 		return ""
 	}
@@ -2985,7 +3152,7 @@ func buildTagWhereUnique(d dialect.Dialect, alias string, args *argState, where 
 	return w.combineAnd(preds)
 }
 
-func buildTagOrderBy(d dialect.Dialect, alias string, order []TagOrderByInput) []string {
+func buildTagOrderBy(d planner.Dialect, alias string, order []TagOrderByInput) []string {
 	var cols []string
 	for _, o := range order {
 		if o.Field == "" {
@@ -3000,7 +3167,7 @@ func buildTagOrderBy(d dialect.Dialect, alias string, order []TagOrderByInput) [
 	return cols
 }
 
-func buildTagDistinct(d dialect.Dialect, alias string, distinct []TagField) []string {
+func buildTagDistinct(d planner.Dialect, alias string, distinct []TagField) []string {
 	var out []string
 	for _, field := range distinct {
 		if field == "" {
@@ -3011,21 +3178,25 @@ func buildTagDistinct(d dialect.Dialect, alias string, distinct []TagField) []st
 	return out
 }
 
-func buildTagJSONExpr(d dialect.Dialect, alias string, args *argState, sel TagSelect) (string, error) {
+func buildTagJSONExpr(d planner.Dialect, alias string, args *argState, sel TagSelect) (string, []string, error) {
 	items := sel
 	includeAll := len(items) == 0
 	var pairs []string
+	var joins []string
 	if includeAll {
 		pairs = append(pairs, jsonPair("id", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("id"))))
 		pairs = append(pairs, jsonPair("name", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("name"))))
 		{
-			expr, err := buildTagVideoTagJSON(d, alias, args, &TagVideoTagSelectArgs{
+			expr, exprJoins, err := buildTagVideoTagJSON(d, alias, args, &TagVideoTagSelectArgs{
 				Select: VideoTagSelectAll,
 			})
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 			pairs = append(pairs, jsonPair("videoTag", wrapJSONValue(d, expr)))
+			if len(exprJoins) > 0 {
+				joins = append(joins, exprJoins...)
+			}
 		}
 	} else {
 		seen := make(map[TagField]struct{})
@@ -3047,11 +3218,14 @@ func buildTagJSONExpr(d dialect.Dialect, alias string, args *argState, sel TagSe
 				}
 				relationSeen["VideoTag"] = struct{}{}
 				{
-					expr, err := buildTagVideoTagJSON(d, alias, args, &v.Args)
+					expr, exprJoins, err := buildTagVideoTagJSON(d, alias, args, &v.Args)
 					if err != nil {
-						return "", err
+						return "", nil, err
 					}
 					pairs = append(pairs, jsonPair("videoTag", wrapJSONValue(d, expr)))
+					if len(exprJoins) > 0 {
+						joins = append(joins, exprJoins...)
+					}
 				}
 			}
 		}
@@ -3059,16 +3233,16 @@ func buildTagJSONExpr(d dialect.Dialect, alias string, args *argState, sel TagSe
 	if len(pairs) == 0 {
 		pairs = append(pairs, jsonPair("id", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("id"))))
 	}
-	return d.JSONBuildObject(pairs...), nil
+	return d.JSONBuildObject(pairs...), joins, nil
 }
-func buildTagVideoTagJSON(d dialect.Dialect, parentAlias string, args *argState, sel *TagVideoTagSelectArgs) (string, error) {
+func buildTagVideoTagJSON(d planner.Dialect, parentAlias string, args *argState, sel *TagVideoTagSelectArgs) (string, []string, error) {
 	if sel == nil {
 		sel = &TagVideoTagSelectArgs{}
 	}
 	childAlias := parentAlias + "_videoTag"
-	childJSON, err := buildVideoTagJSONExpr(d, childAlias, args, sel.Select)
+	childJSON, childJoins, err := buildVideoTagJSONExpr(d, childAlias, args, sel.Select)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	childJSON = wrapJSONValue(d, childJSON)
 	joinConds := make([]string, 0, 1)
@@ -3097,20 +3271,24 @@ func buildTagVideoTagJSON(d dialect.Dialect, parentAlias string, args *argState,
 	offset := convertOpt(sel.Skip)
 	lo = d.LimitOffset(limit, offset)
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("video_tag"), d.QuoteIdent(childAlias))
-	arrayExpr := d.JSONArrayAgg(childJSON)
-	expr := fmt.Sprintf("(SELECT %s FROM %s%s%s", d.CoalesceJSONAgg(arrayExpr, d.JSONArrayEmpty()), tableRef, whereSQL, orderSQL)
-	if lo != "" {
-		expr += " " + lo
+	var childJoinSQL string
+	if len(childJoins) > 0 {
+		childJoinSQL = " " + strings.Join(childJoins, " ")
 	}
-	expr += ")"
-	return expr, nil
+	arrayExpr := d.JSONArrayAgg(childJSON)
+	subquery := fmt.Sprintf("SELECT %s AS %s FROM %s%s%s%s", d.CoalesceJSONAgg(arrayExpr, d.JSONArrayEmpty()), d.QuoteIdent("__bom_json"), tableRef, childJoinSQL, whereSQL, orderSQL)
+	if lo != "" {
+		subquery += " " + lo
+	}
+	expr := fmt.Sprintf("(%s)", subquery)
+	return expr, nil, nil
 }
 
 func FindManyTag[T TagModel](ctx context.Context, db bom.Querier, q TagFindMany) ([]T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	rootAlias := "t0"
-	jsonExpr, err := buildTagJSONExpr(d, rootAlias, state, q.Select)
+	jsonExpr, joins, err := buildTagJSONExpr(d, rootAlias, state, q.Select)
 	if err != nil {
 		return nil, err
 	}
@@ -3125,6 +3303,7 @@ func FindManyTag[T TagModel](ctx context.Context, db bom.Querier, q TagFindMany)
 		Projections: []planner.Projection{
 			{Expr: jsonExpr, Alias: "__bom_json"},
 		},
+		Joins:     joins,
 		Where:     whereClause,
 		Args:      state.Args(),
 		OrderBy:   buildTagOrderBy(d, rootAlias, q.OrderBy),
@@ -3155,7 +3334,7 @@ func FindFirstTag[T TagModel](ctx context.Context, db bom.Querier, q TagFindFirs
 	return &out, nil
 }
 
-func queryTagRows[T TagModel](ctx context.Context, db bom.Querier, d dialect.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
+func queryTagRows[T TagModel](ctx context.Context, db bom.Querier, d planner.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
 	sqlStr, args, err := planner.BuildFindMany(d, input)
 	if err != nil {
 		return nil, err
@@ -3318,7 +3497,7 @@ type VideoTagFindFirst struct {
 	Select  VideoTagSelect
 }
 
-func buildVideoTagWhere(d dialect.Dialect, alias string, args *argState, where *VideoTagWhereInput) string {
+func buildVideoTagWhere(d planner.Dialect, alias string, args *argState, where *VideoTagWhereInput) string {
 	if where == nil {
 		return ""
 	}
@@ -3365,7 +3544,7 @@ func buildVideoTagWherePredicates(w *whereBuilder, where *VideoTagWhereInput) st
 	}
 	return w.combineAnd(preds)
 }
-func buildVideoTagVideoRelation(d dialect.Dialect, parentAlias string, args *argState, rel *VideoTagVideoRelation) string {
+func buildVideoTagVideoRelation(d planner.Dialect, parentAlias string, args *argState, rel *VideoTagVideoRelation) string {
 	if rel == nil {
 		return ""
 	}
@@ -3394,7 +3573,7 @@ func buildVideoTagVideoRelation(d dialect.Dialect, parentAlias string, args *arg
 	return d.And(preds...)
 }
 
-func buildVideoTagVideoRelationExists(d dialect.Dialect, parentAlias string, args *argState, where *VideoWhereInput, negate bool) string {
+func buildVideoTagVideoRelationExists(d planner.Dialect, parentAlias string, args *argState, where *VideoWhereInput, negate bool) string {
 	childAlias := parentAlias + "_video"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("video"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -3420,7 +3599,7 @@ func buildVideoTagVideoRelationExists(d dialect.Dialect, parentAlias string, arg
 	return fmt.Sprintf("EXISTS (%s)", expr)
 }
 
-func buildVideoTagVideoRelationEvery(d dialect.Dialect, parentAlias string, args *argState, where *VideoWhereInput) string {
+func buildVideoTagVideoRelationEvery(d planner.Dialect, parentAlias string, args *argState, where *VideoWhereInput) string {
 	childAlias := parentAlias + "_video" + "_every"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("video"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -3438,7 +3617,7 @@ func buildVideoTagVideoRelationEvery(d dialect.Dialect, parentAlias string, args
 	combined = append(combined, negated)
 	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE %s)", tableRef, strings.Join(combined, " AND "))
 }
-func buildVideoTagTagRelation(d dialect.Dialect, parentAlias string, args *argState, rel *VideoTagTagRelation) string {
+func buildVideoTagTagRelation(d planner.Dialect, parentAlias string, args *argState, rel *VideoTagTagRelation) string {
 	if rel == nil {
 		return ""
 	}
@@ -3467,7 +3646,7 @@ func buildVideoTagTagRelation(d dialect.Dialect, parentAlias string, args *argSt
 	return d.And(preds...)
 }
 
-func buildVideoTagTagRelationExists(d dialect.Dialect, parentAlias string, args *argState, where *TagWhereInput, negate bool) string {
+func buildVideoTagTagRelationExists(d planner.Dialect, parentAlias string, args *argState, where *TagWhereInput, negate bool) string {
 	childAlias := parentAlias + "_tag"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("tag"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -3493,7 +3672,7 @@ func buildVideoTagTagRelationExists(d dialect.Dialect, parentAlias string, args 
 	return fmt.Sprintf("EXISTS (%s)", expr)
 }
 
-func buildVideoTagTagRelationEvery(d dialect.Dialect, parentAlias string, args *argState, where *TagWhereInput) string {
+func buildVideoTagTagRelationEvery(d planner.Dialect, parentAlias string, args *argState, where *TagWhereInput) string {
 	childAlias := parentAlias + "_tag" + "_every"
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("tag"), d.QuoteIdent(childAlias))
 	joinConds := make([]string, 0, 1)
@@ -3512,7 +3691,7 @@ func buildVideoTagTagRelationEvery(d dialect.Dialect, parentAlias string, args *
 	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE %s)", tableRef, strings.Join(combined, " AND "))
 }
 
-func buildVideoTagWhereUnique(d dialect.Dialect, alias string, args *argState, where *VideoTagWhereUniqueInput) string {
+func buildVideoTagWhereUnique(d planner.Dialect, alias string, args *argState, where *VideoTagWhereUniqueInput) string {
 	if where == nil {
 		return ""
 	}
@@ -3527,7 +3706,7 @@ func buildVideoTagWhereUnique(d dialect.Dialect, alias string, args *argState, w
 	return w.combineAnd(preds)
 }
 
-func buildVideoTagOrderBy(d dialect.Dialect, alias string, order []VideoTagOrderByInput) []string {
+func buildVideoTagOrderBy(d planner.Dialect, alias string, order []VideoTagOrderByInput) []string {
 	var cols []string
 	for _, o := range order {
 		if o.Field == "" {
@@ -3542,7 +3721,7 @@ func buildVideoTagOrderBy(d dialect.Dialect, alias string, order []VideoTagOrder
 	return cols
 }
 
-func buildVideoTagDistinct(d dialect.Dialect, alias string, distinct []VideoTagField) []string {
+func buildVideoTagDistinct(d planner.Dialect, alias string, distinct []VideoTagField) []string {
 	var out []string
 	for _, field := range distinct {
 		if field == "" {
@@ -3553,30 +3732,37 @@ func buildVideoTagDistinct(d dialect.Dialect, alias string, distinct []VideoTagF
 	return out
 }
 
-func buildVideoTagJSONExpr(d dialect.Dialect, alias string, args *argState, sel VideoTagSelect) (string, error) {
+func buildVideoTagJSONExpr(d planner.Dialect, alias string, args *argState, sel VideoTagSelect) (string, []string, error) {
 	items := sel
 	includeAll := len(items) == 0
 	var pairs []string
+	var joins []string
 	if includeAll {
 		pairs = append(pairs, jsonPair("video_id", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("video_id"))))
 		pairs = append(pairs, jsonPair("tag_id", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("tag_id"))))
 		{
-			expr, err := buildVideoTagVideoJSON(d, alias, args, &VideoTagVideoSelectArgs{
+			expr, exprJoins, err := buildVideoTagVideoJSON(d, alias, args, &VideoTagVideoSelectArgs{
 				Select: VideoSelectAll,
 			})
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 			pairs = append(pairs, jsonPair("video", wrapJSONValue(d, expr)))
+			if len(exprJoins) > 0 {
+				joins = append(joins, exprJoins...)
+			}
 		}
 		{
-			expr, err := buildVideoTagTagJSON(d, alias, args, &VideoTagTagSelectArgs{
+			expr, exprJoins, err := buildVideoTagTagJSON(d, alias, args, &VideoTagTagSelectArgs{
 				Select: TagSelectAll,
 			})
 			if err != nil {
-				return "", err
+				return "", nil, err
 			}
 			pairs = append(pairs, jsonPair("tag", wrapJSONValue(d, expr)))
+			if len(exprJoins) > 0 {
+				joins = append(joins, exprJoins...)
+			}
 		}
 	} else {
 		seen := make(map[VideoTagField]struct{})
@@ -3598,11 +3784,14 @@ func buildVideoTagJSONExpr(d dialect.Dialect, alias string, args *argState, sel 
 				}
 				relationSeen["Video"] = struct{}{}
 				{
-					expr, err := buildVideoTagVideoJSON(d, alias, args, &v.Args)
+					expr, exprJoins, err := buildVideoTagVideoJSON(d, alias, args, &v.Args)
 					if err != nil {
-						return "", err
+						return "", nil, err
 					}
 					pairs = append(pairs, jsonPair("video", wrapJSONValue(d, expr)))
+					if len(exprJoins) > 0 {
+						joins = append(joins, exprJoins...)
+					}
 				}
 			case VideoTagSelectTag:
 				if _, ok := relationSeen["Tag"]; ok {
@@ -3610,11 +3799,14 @@ func buildVideoTagJSONExpr(d dialect.Dialect, alias string, args *argState, sel 
 				}
 				relationSeen["Tag"] = struct{}{}
 				{
-					expr, err := buildVideoTagTagJSON(d, alias, args, &v.Args)
+					expr, exprJoins, err := buildVideoTagTagJSON(d, alias, args, &v.Args)
 					if err != nil {
-						return "", err
+						return "", nil, err
 					}
 					pairs = append(pairs, jsonPair("tag", wrapJSONValue(d, expr)))
+					if len(exprJoins) > 0 {
+						joins = append(joins, exprJoins...)
+					}
 				}
 			}
 		}
@@ -3622,16 +3814,16 @@ func buildVideoTagJSONExpr(d dialect.Dialect, alias string, args *argState, sel 
 	if len(pairs) == 0 {
 		pairs = append(pairs, jsonPair("video_id", fmt.Sprintf("%s.%s", d.QuoteIdent(alias), d.QuoteIdent("video_id"))))
 	}
-	return d.JSONBuildObject(pairs...), nil
+	return d.JSONBuildObject(pairs...), joins, nil
 }
-func buildVideoTagVideoJSON(d dialect.Dialect, parentAlias string, args *argState, sel *VideoTagVideoSelectArgs) (string, error) {
+func buildVideoTagVideoJSON(d planner.Dialect, parentAlias string, args *argState, sel *VideoTagVideoSelectArgs) (string, []string, error) {
 	if sel == nil {
 		sel = &VideoTagVideoSelectArgs{}
 	}
 	childAlias := parentAlias + "_video"
-	childJSON, err := buildVideoJSONExpr(d, childAlias, args, sel.Select)
+	childJSON, childJoins, err := buildVideoJSONExpr(d, childAlias, args, sel.Select)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	childJSON = wrapJSONValue(d, childJSON)
 	joinConds := make([]string, 0, 1)
@@ -3644,18 +3836,22 @@ func buildVideoTagVideoJSON(d dialect.Dialect, parentAlias string, args *argStat
 		whereSQL = " WHERE " + whereClause
 	}
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("video"), d.QuoteIdent(childAlias))
-	expr := fmt.Sprintf("(SELECT %s FROM %s%s", childJSON, tableRef, whereSQL)
+	var childJoinSQL string
+	if len(childJoins) > 0 {
+		childJoinSQL = " " + strings.Join(childJoins, " ")
+	}
+	expr := fmt.Sprintf("(SELECT %s FROM %s%s%s", childJSON, tableRef, childJoinSQL, whereSQL)
 	expr += ")"
-	return expr, nil
+	return expr, nil, nil
 }
-func buildVideoTagTagJSON(d dialect.Dialect, parentAlias string, args *argState, sel *VideoTagTagSelectArgs) (string, error) {
+func buildVideoTagTagJSON(d planner.Dialect, parentAlias string, args *argState, sel *VideoTagTagSelectArgs) (string, []string, error) {
 	if sel == nil {
 		sel = &VideoTagTagSelectArgs{}
 	}
 	childAlias := parentAlias + "_tag"
-	childJSON, err := buildTagJSONExpr(d, childAlias, args, sel.Select)
+	childJSON, childJoins, err := buildTagJSONExpr(d, childAlias, args, sel.Select)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	childJSON = wrapJSONValue(d, childJSON)
 	joinConds := make([]string, 0, 1)
@@ -3668,16 +3864,20 @@ func buildVideoTagTagJSON(d dialect.Dialect, parentAlias string, args *argState,
 		whereSQL = " WHERE " + whereClause
 	}
 	tableRef := fmt.Sprintf("%s %s", d.QuoteIdent("tag"), d.QuoteIdent(childAlias))
-	expr := fmt.Sprintf("(SELECT %s FROM %s%s", childJSON, tableRef, whereSQL)
+	var childJoinSQL string
+	if len(childJoins) > 0 {
+		childJoinSQL = " " + strings.Join(childJoins, " ")
+	}
+	expr := fmt.Sprintf("(SELECT %s FROM %s%s%s", childJSON, tableRef, childJoinSQL, whereSQL)
 	expr += ")"
-	return expr, nil
+	return expr, nil, nil
 }
 
 func FindManyVideoTag[T VideoTagModel](ctx context.Context, db bom.Querier, q VideoTagFindMany) ([]T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	rootAlias := "t0"
-	jsonExpr, err := buildVideoTagJSONExpr(d, rootAlias, state, q.Select)
+	jsonExpr, joins, err := buildVideoTagJSONExpr(d, rootAlias, state, q.Select)
 	if err != nil {
 		return nil, err
 	}
@@ -3692,6 +3892,7 @@ func FindManyVideoTag[T VideoTagModel](ctx context.Context, db bom.Querier, q Vi
 		Projections: []planner.Projection{
 			{Expr: jsonExpr, Alias: "__bom_json"},
 		},
+		Joins:     joins,
 		Where:     whereClause,
 		Args:      state.Args(),
 		OrderBy:   buildVideoTagOrderBy(d, rootAlias, q.OrderBy),
@@ -3722,7 +3923,7 @@ func FindFirstVideoTag[T VideoTagModel](ctx context.Context, db bom.Querier, q V
 	return &out, nil
 }
 
-func queryVideoTagRows[T VideoTagModel](ctx context.Context, db bom.Querier, d dialect.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
+func queryVideoTagRows[T VideoTagModel](ctx context.Context, db bom.Querier, d planner.Dialect, input planner.FindManyInput, expectArray bool) ([]T, error) {
 	sqlStr, args, err := planner.BuildFindMany(d, input)
 	if err != nil {
 		return nil, err
@@ -3801,7 +4002,7 @@ type AuthorCreateMany struct {
 }
 
 func CreateOneAuthor[T AuthorModel](ctx context.Context, db bom.Querier, q AuthorCreate) (*T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	data := q.Data
 	if err := createAuthorRecord(ctx, db, d, &data); err != nil {
 		return nil, err
@@ -3843,7 +4044,7 @@ func CreateOneAuthor[T AuthorModel](ctx context.Context, db bom.Querier, q Autho
 }
 
 func CreateManyAuthor(ctx context.Context, db bom.Querier, q AuthorCreateMany) (int64, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	if len(q.Data) == 0 {
 		return 0, nil
 	}
@@ -3861,7 +4062,7 @@ func CreateManyAuthor(ctx context.Context, db bom.Querier, q AuthorCreateMany) (
 	return total, nil
 }
 
-func createAuthorRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, data *AuthorCreateData) error {
+func createAuthorRecord(ctx context.Context, db bom.Querier, d planner.Dialect, data *AuthorCreateData) error {
 	state := newArgState(d)
 	var columns []string
 	var placeholders []string
@@ -4015,7 +4216,7 @@ func createAuthorRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, 
 	return nil
 }
 
-func createAuthorRelations(ctx context.Context, db bom.Querier, d dialect.Dialect, data *AuthorCreateData) error {
+func createAuthorRelations(ctx context.Context, db bom.Querier, d planner.Dialect, data *AuthorCreateData) error {
 	if data.AuthorProfile != nil {
 		child := data.AuthorProfile
 		if !child.AuthorId.IsSome() {
@@ -4086,7 +4287,7 @@ type AuthorProfileCreateMany struct {
 }
 
 func CreateOneAuthorProfile[T AuthorProfileModel](ctx context.Context, db bom.Querier, q AuthorProfileCreate) (*T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	data := q.Data
 	if err := createAuthorProfileRecord(ctx, db, d, &data); err != nil {
 		return nil, err
@@ -4128,7 +4329,7 @@ func CreateOneAuthorProfile[T AuthorProfileModel](ctx context.Context, db bom.Qu
 }
 
 func CreateManyAuthorProfile(ctx context.Context, db bom.Querier, q AuthorProfileCreateMany) (int64, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	if len(q.Data) == 0 {
 		return 0, nil
 	}
@@ -4146,7 +4347,7 @@ func CreateManyAuthorProfile(ctx context.Context, db bom.Querier, q AuthorProfil
 	return total, nil
 }
 
-func createAuthorProfileRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, data *AuthorProfileCreateData) error {
+func createAuthorProfileRecord(ctx context.Context, db bom.Querier, d planner.Dialect, data *AuthorProfileCreateData) error {
 	state := newArgState(d)
 	var columns []string
 	var placeholders []string
@@ -4323,7 +4524,7 @@ func createAuthorProfileRecord(ctx context.Context, db bom.Querier, d dialect.Di
 	return nil
 }
 
-func createAuthorProfileRelations(ctx context.Context, db bom.Querier, d dialect.Dialect, data *AuthorProfileCreateData) error {
+func createAuthorProfileRelations(ctx context.Context, db bom.Querier, d planner.Dialect, data *AuthorProfileCreateData) error {
 	return nil
 }
 
@@ -4348,7 +4549,7 @@ type VideoCreateMany struct {
 }
 
 func CreateOneVideo[T VideoModel](ctx context.Context, db bom.Querier, q VideoCreate) (*T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	data := q.Data
 	if err := createVideoRecord(ctx, db, d, &data); err != nil {
 		return nil, err
@@ -4390,7 +4591,7 @@ func CreateOneVideo[T VideoModel](ctx context.Context, db bom.Querier, q VideoCr
 }
 
 func CreateManyVideo(ctx context.Context, db bom.Querier, q VideoCreateMany) (int64, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	if len(q.Data) == 0 {
 		return 0, nil
 	}
@@ -4408,7 +4609,7 @@ func CreateManyVideo(ctx context.Context, db bom.Querier, q VideoCreateMany) (in
 	return total, nil
 }
 
-func createVideoRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, data *VideoCreateData) error {
+func createVideoRecord(ctx context.Context, db bom.Querier, d planner.Dialect, data *VideoCreateData) error {
 	state := newArgState(d)
 	var columns []string
 	var placeholders []string
@@ -4608,7 +4809,7 @@ func createVideoRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, d
 	return nil
 }
 
-func createVideoRelations(ctx context.Context, db bom.Querier, d dialect.Dialect, data *VideoCreateData) error {
+func createVideoRelations(ctx context.Context, db bom.Querier, d planner.Dialect, data *VideoCreateData) error {
 	if len(data.Comment) > 0 {
 		for i := range data.Comment {
 			child := &data.Comment[i]
@@ -4667,7 +4868,7 @@ type CommentCreateMany struct {
 }
 
 func CreateOneComment[T CommentModel](ctx context.Context, db bom.Querier, q CommentCreate) (*T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	data := q.Data
 	if err := createCommentRecord(ctx, db, d, &data); err != nil {
 		return nil, err
@@ -4696,7 +4897,7 @@ func CreateOneComment[T CommentModel](ctx context.Context, db bom.Querier, q Com
 }
 
 func CreateManyComment(ctx context.Context, db bom.Querier, q CommentCreateMany) (int64, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	if len(q.Data) == 0 {
 		return 0, nil
 	}
@@ -4714,7 +4915,7 @@ func CreateManyComment(ctx context.Context, db bom.Querier, q CommentCreateMany)
 	return total, nil
 }
 
-func createCommentRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, data *CommentCreateData) error {
+func createCommentRecord(ctx context.Context, db bom.Querier, d planner.Dialect, data *CommentCreateData) error {
 	state := newArgState(d)
 	var columns []string
 	var placeholders []string
@@ -4891,7 +5092,7 @@ func createCommentRecord(ctx context.Context, db bom.Querier, d dialect.Dialect,
 	return nil
 }
 
-func createCommentRelations(ctx context.Context, db bom.Querier, d dialect.Dialect, data *CommentCreateData) error {
+func createCommentRelations(ctx context.Context, db bom.Querier, d planner.Dialect, data *CommentCreateData) error {
 	return nil
 }
 
@@ -4911,7 +5112,7 @@ type TagCreateMany struct {
 }
 
 func CreateOneTag[T TagModel](ctx context.Context, db bom.Querier, q TagCreate) (*T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	data := q.Data
 	if err := createTagRecord(ctx, db, d, &data); err != nil {
 		return nil, err
@@ -4953,7 +5154,7 @@ func CreateOneTag[T TagModel](ctx context.Context, db bom.Querier, q TagCreate) 
 }
 
 func CreateManyTag(ctx context.Context, db bom.Querier, q TagCreateMany) (int64, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	if len(q.Data) == 0 {
 		return 0, nil
 	}
@@ -4971,7 +5172,7 @@ func CreateManyTag(ctx context.Context, db bom.Querier, q TagCreateMany) (int64,
 	return total, nil
 }
 
-func createTagRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, data *TagCreateData) error {
+func createTagRecord(ctx context.Context, db bom.Querier, d planner.Dialect, data *TagCreateData) error {
 	state := newArgState(d)
 	var columns []string
 	var placeholders []string
@@ -5079,7 +5280,7 @@ func createTagRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, dat
 	return nil
 }
 
-func createTagRelations(ctx context.Context, db bom.Querier, d dialect.Dialect, data *TagCreateData) error {
+func createTagRelations(ctx context.Context, db bom.Querier, d planner.Dialect, data *TagCreateData) error {
 	if len(data.VideoTag) > 0 {
 		for i := range data.VideoTag {
 			child := &data.VideoTag[i]
@@ -5115,7 +5316,7 @@ type VideoTagCreateMany struct {
 }
 
 func CreateOneVideoTag[T VideoTagModel](ctx context.Context, db bom.Querier, q VideoTagCreate) (*T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	data := q.Data
 	if err := createVideoTagRecord(ctx, db, d, &data); err != nil {
 		return nil, err
@@ -5145,7 +5346,7 @@ func CreateOneVideoTag[T VideoTagModel](ctx context.Context, db bom.Querier, q V
 }
 
 func CreateManyVideoTag(ctx context.Context, db bom.Querier, q VideoTagCreateMany) (int64, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	if len(q.Data) == 0 {
 		return 0, nil
 	}
@@ -5163,7 +5364,7 @@ func CreateManyVideoTag(ctx context.Context, db bom.Querier, q VideoTagCreateMan
 	return total, nil
 }
 
-func createVideoTagRecord(ctx context.Context, db bom.Querier, d dialect.Dialect, data *VideoTagCreateData) error {
+func createVideoTagRecord(ctx context.Context, db bom.Querier, d planner.Dialect, data *VideoTagCreateData) error {
 	state := newArgState(d)
 	var columns []string
 	var placeholders []string
@@ -5270,7 +5471,7 @@ func createVideoTagRecord(ctx context.Context, db bom.Querier, d dialect.Dialect
 	return nil
 }
 
-func createVideoTagRelations(ctx context.Context, db bom.Querier, d dialect.Dialect, data *VideoTagCreateData) error {
+func createVideoTagRelations(ctx context.Context, db bom.Querier, d planner.Dialect, data *VideoTagCreateData) error {
 	return nil
 }
 
@@ -5291,7 +5492,7 @@ type AuthorFindUnique[U AuthorUnique] struct {
 	Select AuthorSelect
 }
 
-func buildAuthorUniquePredicate[U AuthorUnique](d dialect.Dialect, alias string, args *argState, where U) (string, error) {
+func buildAuthorUniquePredicate[U AuthorUnique](d planner.Dialect, alias string, args *argState, where U) (string, error) {
 	w := newWhereBuilder(d, alias, args)
 	switch v := any(where).(type) {
 	case AuthorUK_Id:
@@ -5316,14 +5517,14 @@ func buildAuthorUK_EmailPredicate(w *whereBuilder, where AuthorUK_Email) string 
 }
 
 func FindUniqueAuthor[T AuthorModel, U AuthorUnique](ctx context.Context, db bom.Querier, q AuthorFindUnique[U]) (*T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	alias := "t0"
 	whereClause, err := buildAuthorUniquePredicate(d, alias, state, q.Where)
 	if err != nil {
 		return nil, err
 	}
-	jsonExpr, err := buildAuthorJSONExpr(d, alias, state, q.Select)
+	jsonExpr, joins, err := buildAuthorJSONExpr(d, alias, state, q.Select)
 	if err != nil {
 		return nil, err
 	}
@@ -5337,6 +5538,7 @@ func FindUniqueAuthor[T AuthorModel, U AuthorUnique](ctx context.Context, db bom
 		Projections: []planner.Projection{
 			{Expr: jsonExpr, Alias: "__bom_json"},
 		},
+		Joins: joins,
 		Where: whereClause,
 		Args:  state.Args(),
 		Limit: one(),
@@ -5369,7 +5571,7 @@ type AuthorProfileFindUnique[U AuthorProfileUnique] struct {
 	Select AuthorProfileSelect
 }
 
-func buildAuthorProfileUniquePredicate[U AuthorProfileUnique](d dialect.Dialect, alias string, args *argState, where U) (string, error) {
+func buildAuthorProfileUniquePredicate[U AuthorProfileUnique](d planner.Dialect, alias string, args *argState, where U) (string, error) {
 	w := newWhereBuilder(d, alias, args)
 	switch v := any(where).(type) {
 	case AuthorProfileUK_Id:
@@ -5394,14 +5596,14 @@ func buildAuthorProfileUK_AuthorIdPredicate(w *whereBuilder, where AuthorProfile
 }
 
 func FindUniqueAuthorProfile[T AuthorProfileModel, U AuthorProfileUnique](ctx context.Context, db bom.Querier, q AuthorProfileFindUnique[U]) (*T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	alias := "t0"
 	whereClause, err := buildAuthorProfileUniquePredicate(d, alias, state, q.Where)
 	if err != nil {
 		return nil, err
 	}
-	jsonExpr, err := buildAuthorProfileJSONExpr(d, alias, state, q.Select)
+	jsonExpr, joins, err := buildAuthorProfileJSONExpr(d, alias, state, q.Select)
 	if err != nil {
 		return nil, err
 	}
@@ -5415,6 +5617,7 @@ func FindUniqueAuthorProfile[T AuthorProfileModel, U AuthorProfileUnique](ctx co
 		Projections: []planner.Projection{
 			{Expr: jsonExpr, Alias: "__bom_json"},
 		},
+		Joins: joins,
 		Where: whereClause,
 		Args:  state.Args(),
 		Limit: one(),
@@ -5447,7 +5650,7 @@ type VideoFindUnique[U VideoUnique] struct {
 	Select VideoSelect
 }
 
-func buildVideoUniquePredicate[U VideoUnique](d dialect.Dialect, alias string, args *argState, where U) (string, error) {
+func buildVideoUniquePredicate[U VideoUnique](d planner.Dialect, alias string, args *argState, where U) (string, error) {
 	w := newWhereBuilder(d, alias, args)
 	switch v := any(where).(type) {
 	case VideoUK_Id:
@@ -5472,14 +5675,14 @@ func buildVideoUK_SlugPredicate(w *whereBuilder, where VideoUK_Slug) string {
 }
 
 func FindUniqueVideo[T VideoModel, U VideoUnique](ctx context.Context, db bom.Querier, q VideoFindUnique[U]) (*T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	alias := "t0"
 	whereClause, err := buildVideoUniquePredicate(d, alias, state, q.Where)
 	if err != nil {
 		return nil, err
 	}
-	jsonExpr, err := buildVideoJSONExpr(d, alias, state, q.Select)
+	jsonExpr, joins, err := buildVideoJSONExpr(d, alias, state, q.Select)
 	if err != nil {
 		return nil, err
 	}
@@ -5493,6 +5696,7 @@ func FindUniqueVideo[T VideoModel, U VideoUnique](ctx context.Context, db bom.Qu
 		Projections: []planner.Projection{
 			{Expr: jsonExpr, Alias: "__bom_json"},
 		},
+		Joins: joins,
 		Where: whereClause,
 		Args:  state.Args(),
 		Limit: one(),
@@ -5521,7 +5725,7 @@ type CommentFindUnique[U CommentUnique] struct {
 	Select CommentSelect
 }
 
-func buildCommentUniquePredicate[U CommentUnique](d dialect.Dialect, alias string, args *argState, where U) (string, error) {
+func buildCommentUniquePredicate[U CommentUnique](d planner.Dialect, alias string, args *argState, where U) (string, error) {
 	w := newWhereBuilder(d, alias, args)
 	switch v := any(where).(type) {
 	case CommentUK_Id:
@@ -5538,14 +5742,14 @@ func buildCommentUK_IdPredicate(w *whereBuilder, where CommentUK_Id) string {
 }
 
 func FindUniqueComment[T CommentModel, U CommentUnique](ctx context.Context, db bom.Querier, q CommentFindUnique[U]) (*T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	alias := "t0"
 	whereClause, err := buildCommentUniquePredicate(d, alias, state, q.Where)
 	if err != nil {
 		return nil, err
 	}
-	jsonExpr, err := buildCommentJSONExpr(d, alias, state, q.Select)
+	jsonExpr, joins, err := buildCommentJSONExpr(d, alias, state, q.Select)
 	if err != nil {
 		return nil, err
 	}
@@ -5559,6 +5763,7 @@ func FindUniqueComment[T CommentModel, U CommentUnique](ctx context.Context, db 
 		Projections: []planner.Projection{
 			{Expr: jsonExpr, Alias: "__bom_json"},
 		},
+		Joins: joins,
 		Where: whereClause,
 		Args:  state.Args(),
 		Limit: one(),
@@ -5591,7 +5796,7 @@ type TagFindUnique[U TagUnique] struct {
 	Select TagSelect
 }
 
-func buildTagUniquePredicate[U TagUnique](d dialect.Dialect, alias string, args *argState, where U) (string, error) {
+func buildTagUniquePredicate[U TagUnique](d planner.Dialect, alias string, args *argState, where U) (string, error) {
 	w := newWhereBuilder(d, alias, args)
 	switch v := any(where).(type) {
 	case TagUK_Id:
@@ -5616,14 +5821,14 @@ func buildTagUK_NamePredicate(w *whereBuilder, where TagUK_Name) string {
 }
 
 func FindUniqueTag[T TagModel, U TagUnique](ctx context.Context, db bom.Querier, q TagFindUnique[U]) (*T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	alias := "t0"
 	whereClause, err := buildTagUniquePredicate(d, alias, state, q.Where)
 	if err != nil {
 		return nil, err
 	}
-	jsonExpr, err := buildTagJSONExpr(d, alias, state, q.Select)
+	jsonExpr, joins, err := buildTagJSONExpr(d, alias, state, q.Select)
 	if err != nil {
 		return nil, err
 	}
@@ -5637,6 +5842,7 @@ func FindUniqueTag[T TagModel, U TagUnique](ctx context.Context, db bom.Querier,
 		Projections: []planner.Projection{
 			{Expr: jsonExpr, Alias: "__bom_json"},
 		},
+		Joins: joins,
 		Where: whereClause,
 		Args:  state.Args(),
 		Limit: one(),
@@ -5666,7 +5872,7 @@ type VideoTagFindUnique[U VideoTagUnique] struct {
 	Select VideoTagSelect
 }
 
-func buildVideoTagUniquePredicate[U VideoTagUnique](d dialect.Dialect, alias string, args *argState, where U) (string, error) {
+func buildVideoTagUniquePredicate[U VideoTagUnique](d planner.Dialect, alias string, args *argState, where U) (string, error) {
 	w := newWhereBuilder(d, alias, args)
 	switch v := any(where).(type) {
 	case VideoTagUK_VideoIdTagId:
@@ -5684,14 +5890,14 @@ func buildVideoTagUK_VideoIdTagIdPredicate(w *whereBuilder, where VideoTagUK_Vid
 }
 
 func FindUniqueVideoTag[T VideoTagModel, U VideoTagUnique](ctx context.Context, db bom.Querier, q VideoTagFindUnique[U]) (*T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	alias := "t0"
 	whereClause, err := buildVideoTagUniquePredicate(d, alias, state, q.Where)
 	if err != nil {
 		return nil, err
 	}
-	jsonExpr, err := buildVideoTagJSONExpr(d, alias, state, q.Select)
+	jsonExpr, joins, err := buildVideoTagJSONExpr(d, alias, state, q.Select)
 	if err != nil {
 		return nil, err
 	}
@@ -5705,6 +5911,7 @@ func FindUniqueVideoTag[T VideoTagModel, U VideoTagUnique](ctx context.Context, 
 		Projections: []planner.Projection{
 			{Expr: jsonExpr, Alias: "__bom_json"},
 		},
+		Joins: joins,
 		Where: whereClause,
 		Args:  state.Args(),
 		Limit: one(),
@@ -5727,7 +5934,7 @@ type AuthorUpdateData struct {
 	CreatedAt opt.Opt[string]
 }
 
-func buildAuthorUpdateSet(d dialect.Dialect, state *argState, data *AuthorUpdateData) ([]string, int) {
+func buildAuthorUpdateSet(d planner.Dialect, state *argState, data *AuthorUpdateData) ([]string, int) {
 	if data == nil {
 		return nil, 0
 	}
@@ -5754,7 +5961,7 @@ type AuthorUpdate[U AuthorUnique] struct {
 }
 
 func UpdateOneAuthor[T AuthorModel, U AuthorUnique](ctx context.Context, db bom.Querier, q AuthorUpdate[U]) (*T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	setClauses, count := buildAuthorUpdateSet(d, state, &q.Data)
 	if count == 0 {
@@ -5822,7 +6029,7 @@ type AuthorUpdateMany struct {
 }
 
 func UpdateManyAuthor(ctx context.Context, db bom.Querier, q AuthorUpdateMany) (int64, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	setClauses, count := buildAuthorUpdateSet(d, state, &q.Data)
 	if count == 0 {
@@ -5855,7 +6062,7 @@ type AuthorProfileUpdateData struct {
 	CreatedAt opt.Opt[string]
 }
 
-func buildAuthorProfileUpdateSet(d dialect.Dialect, state *argState, data *AuthorProfileUpdateData) ([]string, int) {
+func buildAuthorProfileUpdateSet(d planner.Dialect, state *argState, data *AuthorProfileUpdateData) ([]string, int) {
 	if data == nil {
 		return nil, 0
 	}
@@ -5885,7 +6092,7 @@ type AuthorProfileUpdate[U AuthorProfileUnique] struct {
 }
 
 func UpdateOneAuthorProfile[T AuthorProfileModel, U AuthorProfileUnique](ctx context.Context, db bom.Querier, q AuthorProfileUpdate[U]) (*T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	setClauses, count := buildAuthorProfileUpdateSet(d, state, &q.Data)
 	if count == 0 {
@@ -5953,7 +6160,7 @@ type AuthorProfileUpdateMany struct {
 }
 
 func UpdateManyAuthorProfile(ctx context.Context, db bom.Querier, q AuthorProfileUpdateMany) (int64, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	setClauses, count := buildAuthorProfileUpdateSet(d, state, &q.Data)
 	if count == 0 {
@@ -5987,7 +6194,7 @@ type VideoUpdateData struct {
 	CreatedAt   opt.Opt[string]
 }
 
-func buildVideoUpdateSet(d dialect.Dialect, state *argState, data *VideoUpdateData) ([]string, int) {
+func buildVideoUpdateSet(d planner.Dialect, state *argState, data *VideoUpdateData) ([]string, int) {
 	if data == nil {
 		return nil, 0
 	}
@@ -6020,7 +6227,7 @@ type VideoUpdate[U VideoUnique] struct {
 }
 
 func UpdateOneVideo[T VideoModel, U VideoUnique](ctx context.Context, db bom.Querier, q VideoUpdate[U]) (*T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	setClauses, count := buildVideoUpdateSet(d, state, &q.Data)
 	if count == 0 {
@@ -6088,7 +6295,7 @@ type VideoUpdateMany struct {
 }
 
 func UpdateManyVideo(ctx context.Context, db bom.Querier, q VideoUpdateMany) (int64, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	setClauses, count := buildVideoUpdateSet(d, state, &q.Data)
 	if count == 0 {
@@ -6121,7 +6328,7 @@ type CommentUpdateData struct {
 	CreatedAt opt.Opt[string]
 }
 
-func buildCommentUpdateSet(d dialect.Dialect, state *argState, data *CommentUpdateData) ([]string, int) {
+func buildCommentUpdateSet(d planner.Dialect, state *argState, data *CommentUpdateData) ([]string, int) {
 	if data == nil {
 		return nil, 0
 	}
@@ -6151,7 +6358,7 @@ type CommentUpdate[U CommentUnique] struct {
 }
 
 func UpdateOneComment[T CommentModel, U CommentUnique](ctx context.Context, db bom.Querier, q CommentUpdate[U]) (*T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	setClauses, count := buildCommentUpdateSet(d, state, &q.Data)
 	if count == 0 {
@@ -6213,7 +6420,7 @@ type CommentUpdateMany struct {
 }
 
 func UpdateManyComment(ctx context.Context, db bom.Querier, q CommentUpdateMany) (int64, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	setClauses, count := buildCommentUpdateSet(d, state, &q.Data)
 	if count == 0 {
@@ -6243,7 +6450,7 @@ type TagUpdateData struct {
 	Name opt.Opt[string]
 }
 
-func buildTagUpdateSet(d dialect.Dialect, state *argState, data *TagUpdateData) ([]string, int) {
+func buildTagUpdateSet(d planner.Dialect, state *argState, data *TagUpdateData) ([]string, int) {
 	if data == nil {
 		return nil, 0
 	}
@@ -6264,7 +6471,7 @@ type TagUpdate[U TagUnique] struct {
 }
 
 func UpdateOneTag[T TagModel, U TagUnique](ctx context.Context, db bom.Querier, q TagUpdate[U]) (*T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	setClauses, count := buildTagUpdateSet(d, state, &q.Data)
 	if count == 0 {
@@ -6332,7 +6539,7 @@ type TagUpdateMany struct {
 }
 
 func UpdateManyTag(ctx context.Context, db bom.Querier, q TagUpdateMany) (int64, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	setClauses, count := buildTagUpdateSet(d, state, &q.Data)
 	if count == 0 {
@@ -6362,7 +6569,7 @@ type VideoTagUpdateData struct {
 	TagId   opt.Opt[uint64]
 }
 
-func buildVideoTagUpdateSet(d dialect.Dialect, state *argState, data *VideoTagUpdateData) ([]string, int) {
+func buildVideoTagUpdateSet(d planner.Dialect, state *argState, data *VideoTagUpdateData) ([]string, int) {
 	if data == nil {
 		return nil, 0
 	}
@@ -6383,7 +6590,7 @@ type VideoTagUpdate[U VideoTagUnique] struct {
 }
 
 func UpdateOneVideoTag[T VideoTagModel, U VideoTagUnique](ctx context.Context, db bom.Querier, q VideoTagUpdate[U]) (*T, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	setClauses, count := buildVideoTagUpdateSet(d, state, &q.Data)
 	if count == 0 {
@@ -6448,7 +6655,7 @@ type VideoTagUpdateMany struct {
 }
 
 func UpdateManyVideoTag(ctx context.Context, db bom.Querier, q VideoTagUpdateMany) (int64, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	setClauses, count := buildVideoTagUpdateSet(d, state, &q.Data)
 	if count == 0 {
@@ -6486,7 +6693,7 @@ func DeleteOneAuthor[T AuthorModel, U AuthorUnique](ctx context.Context, db bom.
 	if err != nil {
 		return nil, err
 	}
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	alias := "author"
 	whereClause, err := buildAuthorUniquePredicate(d, alias, state, q.Where)
@@ -6522,7 +6729,7 @@ type AuthorDeleteMany struct {
 }
 
 func DeleteManyAuthor(ctx context.Context, db bom.Querier, q AuthorDeleteMany) (int64, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	whereClause := buildAuthorWhere(d, "author", state, q.Where)
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
@@ -6555,7 +6762,7 @@ func DeleteOneAuthorProfile[T AuthorProfileModel, U AuthorProfileUnique](ctx con
 	if err != nil {
 		return nil, err
 	}
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	alias := "author_profile"
 	whereClause, err := buildAuthorProfileUniquePredicate(d, alias, state, q.Where)
@@ -6591,7 +6798,7 @@ type AuthorProfileDeleteMany struct {
 }
 
 func DeleteManyAuthorProfile(ctx context.Context, db bom.Querier, q AuthorProfileDeleteMany) (int64, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	whereClause := buildAuthorProfileWhere(d, "author_profile", state, q.Where)
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
@@ -6624,7 +6831,7 @@ func DeleteOneVideo[T VideoModel, U VideoUnique](ctx context.Context, db bom.Que
 	if err != nil {
 		return nil, err
 	}
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	alias := "video"
 	whereClause, err := buildVideoUniquePredicate(d, alias, state, q.Where)
@@ -6660,7 +6867,7 @@ type VideoDeleteMany struct {
 }
 
 func DeleteManyVideo(ctx context.Context, db bom.Querier, q VideoDeleteMany) (int64, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	whereClause := buildVideoWhere(d, "video", state, q.Where)
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
@@ -6693,7 +6900,7 @@ func DeleteOneComment[T CommentModel, U CommentUnique](ctx context.Context, db b
 	if err != nil {
 		return nil, err
 	}
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	alias := "comment"
 	whereClause, err := buildCommentUniquePredicate(d, alias, state, q.Where)
@@ -6729,7 +6936,7 @@ type CommentDeleteMany struct {
 }
 
 func DeleteManyComment(ctx context.Context, db bom.Querier, q CommentDeleteMany) (int64, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	whereClause := buildCommentWhere(d, "comment", state, q.Where)
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
@@ -6762,7 +6969,7 @@ func DeleteOneTag[T TagModel, U TagUnique](ctx context.Context, db bom.Querier, 
 	if err != nil {
 		return nil, err
 	}
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	alias := "tag"
 	whereClause, err := buildTagUniquePredicate(d, alias, state, q.Where)
@@ -6798,7 +7005,7 @@ type TagDeleteMany struct {
 }
 
 func DeleteManyTag(ctx context.Context, db bom.Querier, q TagDeleteMany) (int64, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	whereClause := buildTagWhere(d, "tag", state, q.Where)
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {
@@ -6831,7 +7038,7 @@ func DeleteOneVideoTag[T VideoTagModel, U VideoTagUnique](ctx context.Context, d
 	if err != nil {
 		return nil, err
 	}
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	alias := "video_tag"
 	whereClause, err := buildVideoTagUniquePredicate(d, alias, state, q.Where)
@@ -6867,7 +7074,7 @@ type VideoTagDeleteMany struct {
 }
 
 func DeleteManyVideoTag(ctx context.Context, db bom.Querier, q VideoTagDeleteMany) (int64, error) {
-	d := dialectsqlite.New()
+	d := dialectInstance
 	state := newArgState(d)
 	whereClause := buildVideoTagWhere(d, "video_tag", state, q.Where)
 	if err := ensureParamLimit(d, len(state.Args())); err != nil {

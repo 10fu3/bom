@@ -9,7 +9,7 @@ type {{ .ModelName }}UpdateData struct {
   {{- end }}
 }
 
-func build{{ .ModelName }}UpdateSet(d dialect.Dialect, state *argState, data *{{ .ModelName }}UpdateData) ([]string, int) {
+func build{{ .ModelName }}UpdateSet(d planner.Dialect, state *argState, data *{{ .ModelName }}UpdateData) ([]string, int) {
   if data == nil {
     return nil, 0
   }
@@ -30,7 +30,7 @@ type {{ .ModelName }}Update[U {{ .ModelName }}Unique] struct {
 }
 
 func UpdateOne{{ .ModelName }}[T {{ .ModelName }}Model, U {{ .ModelName }}Unique](ctx context.Context, db bom.Querier, q {{ .ModelName }}Update[U]) (*T, error) {
-  d := {{ $.DialectInit }}
+  d := dialectInstance
   state := newArgState(d)
   setClauses, count := build{{ .ModelName }}UpdateSet(d, state, &q.Data)
   if count == 0 {
@@ -97,7 +97,7 @@ type {{ .ModelName }}UpdateMany struct {
 }
 
 func UpdateMany{{ .ModelName }}(ctx context.Context, db bom.Querier, q {{ .ModelName }}UpdateMany) (int64, error) {
-  d := {{ $.DialectInit }}
+  d := dialectInstance
   state := newArgState(d)
   setClauses, count := build{{ .ModelName }}UpdateSet(d, state, &q.Data)
   if count == 0 {

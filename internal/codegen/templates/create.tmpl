@@ -27,7 +27,7 @@ type {{ .ModelName }}CreateMany struct {
 }
 
 func CreateOne{{ .ModelName }}[T {{ .ModelName }}Model](ctx context.Context, db bom.Querier, q {{ .ModelName }}Create) (*T, error) {
-	d := {{ $.DialectInit }}
+	d := dialectInstance
 	data := q.Data
 	if err := create{{ .ModelName }}Record(ctx, db, d, &data); err != nil {
 		return nil, err
@@ -60,7 +60,7 @@ func CreateOne{{ .ModelName }}[T {{ .ModelName }}Model](ctx context.Context, db 
 }
 
 func CreateMany{{ .ModelName }}(ctx context.Context, db bom.Querier, q {{ .ModelName }}CreateMany) (int64, error) {
-	d := {{ $.DialectInit }}
+	d := dialectInstance
 	if len(q.Data) == 0 {
 		return 0, nil
 	}
@@ -78,7 +78,7 @@ func CreateMany{{ .ModelName }}(ctx context.Context, db bom.Querier, q {{ .Model
 	return total, nil
 }
 
-func create{{ .ModelName }}Record(ctx context.Context, db bom.Querier, d dialect.Dialect, data *{{ .ModelName }}CreateData) error {
+func create{{ .ModelName }}Record(ctx context.Context, db bom.Querier, d planner.Dialect, data *{{ .ModelName }}CreateData) error {
 	state := newArgState(d)
 	var columns []string
 	var placeholders []string
@@ -190,7 +190,7 @@ func create{{ .ModelName }}Record(ctx context.Context, db bom.Querier, d dialect
 	return nil
 }
 
-func create{{ .ModelName }}Relations(ctx context.Context, db bom.Querier, d dialect.Dialect, data *{{ .ModelName }}CreateData) error {
+func create{{ .ModelName }}Relations(ctx context.Context, db bom.Querier, d planner.Dialect, data *{{ .ModelName }}CreateData) error {
 	{{- range .Relations }}
 	{{- if eq .Kind "HasMany" }}
 	if len(data.{{ .FieldName }}) > 0 {
