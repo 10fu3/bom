@@ -2,6 +2,7 @@ package config
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -81,17 +82,24 @@ func Parse(r io.Reader) (Config, error) {
 		case "output":
 			if strings.HasPrefix(trimmed, "root:") {
 				cfg.Output.Root = strings.TrimSpace(strings.TrimPrefix(trimmed, "root:"))
+				continue
 			}
+			return cfg, fmt.Errorf("unknown output key: %q", trimmed)
 		case "alias":
 			if strings.HasPrefix(trimmed, "strategy:") {
 				cfg.Alias.Strategy = strings.TrimSpace(strings.TrimPrefix(trimmed, "strategy:"))
+				continue
 			}
 			if strings.HasPrefix(trimmed, "width:") {
 				v := strings.TrimSpace(strings.TrimPrefix(trimmed, "width:"))
-				if n, err := strconv.Atoi(v); err == nil {
-					cfg.Alias.Width = n
+				n, err := strconv.Atoi(v)
+				if err != nil {
+					return cfg, fmt.Errorf("alias.width must be integer: %w", err)
 				}
+				cfg.Alias.Width = n
+				continue
 			}
+			return cfg, fmt.Errorf("unknown alias key: %q", trimmed)
 		case "associations":
 			if indent == 2 {
 				key, val := splitKeyValue(trimmed)
@@ -111,12 +119,16 @@ func Parse(r io.Reader) (Config, error) {
 				currentAssoc = &cfg.Associations[assocTable][len(cfg.Associations[assocTable])-1]
 				rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "-"))
 				if rest != "" {
-					parseAssocField(currentAssoc, rest)
+					if err := parseAssocField(currentAssoc, rest); err != nil {
+						return cfg, err
+					}
 				}
 				continue
 			}
 			if indent >= 6 && currentAssoc != nil {
-				parseAssocField(currentAssoc, trimmed)
+				if err := parseAssocField(currentAssoc, trimmed); err != nil {
+					return cfg, err
+				}
 			}
 		case "identity":
 			if indent == 2 {
@@ -147,6 +159,8 @@ func Parse(r io.Reader) (Config, error) {
 				cfg.Dialect = val
 			case "allow_null_unique":
 				cfg.AllowNullUnique = parseBool(val)
+			default:
+				return cfg, fmt.Errorf("unknown top-level key: %q", key)
 			}
 		}
 	}
@@ -157,7 +171,7 @@ func Parse(r io.Reader) (Config, error) {
 	return cfg, nil
 }
 
-func parseAssocField(entry *Association, trimmed string) {
+func parseAssocField(entry *Association, trimmed string) error {
 	key, val := splitKeyValue(trimmed)
 	switch key {
 	case "type":
@@ -168,7 +182,10 @@ func parseAssocField(entry *Association, trimmed string) {
 		entry.LocalKeys = parseInlineStrings(val)
 	case "foreign_keys":
 		entry.ForeignKeys = parseInlineStrings(val)
+	default:
+		return fmt.Errorf("unknown association key: %q", key)
 	}
+	return nil
 }
 
 func splitKeyValue(line string) (string, string) {
