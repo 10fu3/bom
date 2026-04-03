@@ -7,7 +7,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"bom/internal/schema"
+	"github.com/10fu3/bom/internal/schema"
 )
 
 type lexer struct {

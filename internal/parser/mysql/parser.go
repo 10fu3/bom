@@ -9,7 +9,7 @@ import (
 	"github.com/pingcap/tidb/parser/format"
 	_ "github.com/pingcap/tidb/parser/test_driver"
 
-	"bom/internal/schema"
+	"github.com/10fu3/bom/internal/schema"
 )
 
 type Parser struct{}

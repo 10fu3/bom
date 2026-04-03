@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"bom/internal/schema"
+	"github.com/10fu3/bom/internal/schema"
 )
 
 func TestGenerateCreatesTypes(t *testing.T) {

@@ -9,14 +9,14 @@ import (
 	"os"
 	"strings"
 
-	"bom/internal/assoc"
-	"bom/internal/codegen"
-	"bom/internal/config"
-	parseriface "bom/internal/parser"
-	parsermysql "bom/internal/parser/mysql"
-	parserpostgres "bom/internal/parser/postgres"
-	parsersqlite "bom/internal/parser/sqlite"
-	"bom/internal/schema"
+	"github.com/10fu3/bom/internal/assoc"
+	"github.com/10fu3/bom/internal/codegen"
+	"github.com/10fu3/bom/internal/config"
+	parseriface "github.com/10fu3/bom/internal/parser"
+	parsermysql "github.com/10fu3/bom/internal/parser/mysql"
+	parserpostgres "github.com/10fu3/bom/internal/parser/postgres"
+	parsersqlite "github.com/10fu3/bom/internal/parser/sqlite"
+	"github.com/10fu3/bom/internal/schema"
 )
 
 func main() {

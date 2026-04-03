@@ -22,7 +22,7 @@ go install ./cmd/bomgen
 
 生成済みコードの実行に必要なパッケージを追加します。
 ```bash
-go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
+go get github.com/10fu3/bom/pkg/bom github.com/10fu3/bom/pkg/opt github.com/10fu3/bom/pkg/dialect/...
 ```
 
 ## クイックスタート
@@ -46,8 +46,8 @@ go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
      "context"
      "database/sql"
 
-     "bom/pkg/generated"
-     "bom/pkg/opt"
+     "github.com/10fu3/bom/pkg/generated"
+     "github.com/10fu3/bom/pkg/opt"
    )
 
    func listVideos(ctx context.Context, db *sql.DB) ([]generated.Video, error) {

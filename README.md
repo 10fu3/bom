@@ -22,7 +22,7 @@ go install ./cmd/bomgen
 
 Add the runtime packages to your module (they are already part of this repo if vendored):
 ```bash
-go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
+go get github.com/10fu3/bom/pkg/bom github.com/10fu3/bom/pkg/opt github.com/10fu3/bom/pkg/dialect/...
 ```
 
 ## Quick start
@@ -50,9 +50,9 @@ go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
    import (
      "context"
 
-     "bom/examples/sqlite/generated"
-     "bom/pkg/bom"
-     "bom/pkg/opt"
+     "github.com/10fu3/bom/examples/sqlite/generated"
+     "github.com/10fu3/bom/pkg/bom"
+     "github.com/10fu3/bom/pkg/opt"
    )
 
    func sampleHasOne(ctx context.Context, db bom.Querier) {

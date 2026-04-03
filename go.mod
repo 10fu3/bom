@@ -1,4 +1,4 @@
-module bom
+module github.com/10fu3/bom
 
 go 1.24.2
 

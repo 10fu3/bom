@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"bom/internal/planner"
-	"bom/pkg/bom"
-	"bom/pkg/opt"
+	"github.com/10fu3/bom/internal/planner"
+	"github.com/10fu3/bom/pkg/bom"
+	"github.com/10fu3/bom/pkg/opt"
 )
 
 type OrderDirection string

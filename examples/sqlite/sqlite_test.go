@@ -7,8 +7,8 @@ import (
 	"database/sql"
 	"testing"
 
-	"bom/examples/sqlite/generated"
-	"bom/pkg/opt"
+	"github.com/10fu3/bom/examples/sqlite/generated"
+	"github.com/10fu3/bom/pkg/opt"
 	_ "modernc.org/sqlite"
 )
 

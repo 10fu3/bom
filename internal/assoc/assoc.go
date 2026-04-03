@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"bom/internal/config"
-	"bom/internal/schema"
+	"github.com/10fu3/bom/internal/config"
+	"github.com/10fu3/bom/internal/schema"
 )
 
 // Resolve merges inferred + user-supplied associations into the schema IR.

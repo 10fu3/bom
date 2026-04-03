@@ -3,7 +3,7 @@ package parser
 import (
 	"context"
 
-	"bom/internal/schema"
+	"github.com/10fu3/bom/internal/schema"
 )
 
 // DDLParser parses dialect-specific DDL into the intermediate representation.
