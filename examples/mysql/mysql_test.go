@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"bom/examples/mysql/generated"
-	"bom/pkg/opt"
+	"github.com/10fu3/bom/examples/mysql/generated"
+	"github.com/10fu3/bom/pkg/opt"
 	_ "github.com/go-sql-driver/mysql"
 )
 

@@ -11,7 +11,7 @@ import (
 	"text/template"
 	"unicode"
 
-	"bom/internal/schema"
+	"github.com/10fu3/bom/internal/schema"
 )
 
 //go:embed templates/*.tmpl templates/*/*.tmpl

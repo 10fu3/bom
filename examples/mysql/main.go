@@ -3,9 +3,9 @@ package mysql
 import (
 	"context"
 
-	"bom/examples/mysql/generated"
-	"bom/pkg/bom"
-	"bom/pkg/opt"
+	"github.com/10fu3/bom/examples/mysql/generated"
+	"github.com/10fu3/bom/pkg/bom"
+	"github.com/10fu3/bom/pkg/opt"
 )
 
 // main exists so `go test ./...` can build the example module.

@@ -3,8 +3,8 @@ package assoc
 import (
 	"testing"
 
-	"bom/internal/config"
-	"bom/internal/schema"
+	"github.com/10fu3/bom/internal/config"
+	"github.com/10fu3/bom/internal/schema"
 )
 
 func TestResolve(t *testing.T) {

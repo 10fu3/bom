@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"bom/examples/sqlite/generated"
-	"bom/pkg/bom"
-	"bom/pkg/opt"
+	"github.com/10fu3/bom/examples/sqlite/generated"
+	"github.com/10fu3/bom/pkg/bom"
+	"github.com/10fu3/bom/pkg/opt"
 )
 
 type stmtData struct {

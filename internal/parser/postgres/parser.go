@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"bom/internal/schema"
+	"github.com/10fu3/bom/internal/schema"
 )
 
 // Parser implements schema parsing for PostgreSQL DDL using a goyacc-generated grammar.

@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"bom/examples/postgres/generated"
-	"bom/pkg/opt"
+	"github.com/10fu3/bom/examples/postgres/generated"
+	"github.com/10fu3/bom/pkg/opt"
 	_ "github.com/lib/pq"
 )
 
