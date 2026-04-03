@@ -51,3 +51,24 @@ associations:
 		t.Fatalf("actor association should be empty slice")
 	}
 }
+
+func TestParseRejectsInvalidAliasWidth(t *testing.T) {
+	const raw = `
+alias:
+  width: foo
+`
+	_, err := Parse(strings.NewReader(raw))
+	if err == nil {
+		t.Fatalf("expected parse error")
+	}
+}
+
+func TestParseRejectsUnknownTopLevelKey(t *testing.T) {
+	const raw = `
+unknown_key: value
+`
+	_, err := Parse(strings.NewReader(raw))
+	if err == nil {
+		t.Fatalf("expected parse error")
+	}
+}

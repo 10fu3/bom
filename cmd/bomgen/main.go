@@ -30,14 +30,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("cannot read DDL: %v", err)
 	}
+	const defaultConfigPath = "./bom.yml"
+	var cfg config.Config
 	cfgData, err := os.ReadFile(*configPath)
 	if err != nil {
-		log.Fatalf("cannot read config: %v", err)
-	}
-
-	cfg, err := config.Parse(bytes.NewReader(cfgData))
-	if err != nil {
-		log.Fatalf("config parse failed: %v", err)
+		if !(os.IsNotExist(err) && *configPath == defaultConfigPath) {
+			log.Fatalf("cannot read config: %v", err)
+		}
+	} else {
+		cfg, err = config.Parse(bytes.NewReader(cfgData))
+		if err != nil {
+			log.Fatalf("config parse failed: %v", err)
+		}
 	}
 
 	parserName := cfg.Dialect

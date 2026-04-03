@@ -165,3 +165,7 @@ go get bom/pkg/bom bom/pkg/opt bom/pkg/dialect/...
 Copyright (c) 2025 10fu3
 Released under the MIT license
 https://opensource.org/licenses/mit-license.php
+
+追加のライセンス表記:
+- PostgreSQL について、`internal/parser/postgres/ddl.y` と `internal/parser/postgres/ddl_gen.go` は PostgreSQL のライセンスに従います。
+- SQLite について、`internal/parser/sqlite/ddl.y`、`internal/parser/sqlite/ddl_gen.go`、`internal/parser/sqlite/lexer.l`、`internal/parser/sqlite/lexer.go` は SQLite のライセンスに従います。
